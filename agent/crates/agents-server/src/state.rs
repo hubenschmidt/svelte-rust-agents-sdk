@@ -13,8 +13,9 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let main_model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
-        let worker_model = env::var("WORKER_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
+        let main_model =
+            env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5.2-chat-latest".to_string());
+        let worker_model = env::var("WORKER_MODEL").unwrap_or_else(|_| "gpt-5.1".to_string());
 
         let frontline = Frontline::new(&main_model);
         let orchestrator = Orchestrator::new(&main_model);
@@ -22,12 +23,17 @@ impl AppState {
 
         let serpapi_key = env::var("SERPAPI_KEY").unwrap_or_default();
         let sendgrid_key = env::var("SENDGRID_API_KEY").unwrap_or_default();
-        let from_email = env::var("SENDGRID_FROM_EMAIL").unwrap_or_else(|_| "noreply@example.com".to_string());
+        let from_email =
+            env::var("SENDGRID_FROM_EMAIL").unwrap_or_else(|_| "noreply@example.com".to_string());
 
         let mut workers = WorkerRegistry::new();
         workers.register(Arc::new(GeneralWorker::new(&worker_model)));
         workers.register(Arc::new(SearchWorker::new(&worker_model, serpapi_key)));
-        workers.register(Arc::new(EmailWorker::new(&worker_model, sendgrid_key, from_email)));
+        workers.register(Arc::new(EmailWorker::new(
+            &worker_model,
+            sendgrid_key,
+            from_email,
+        )));
 
         let pipeline = PipelineRunner::new(frontline, orchestrator, evaluator, workers);
 
