@@ -1,5 +1,5 @@
 use agents_core::{AgentError, Worker, WorkerResult, WorkerType};
-use agents_llm::LlmClient;
+use agents_llm::{LlmClient, LlmStream};
 use async_trait::async_trait;
 use tracing::info;
 
@@ -14,6 +14,11 @@ impl GeneralWorker {
         Self {
             client: LlmClient::new(model),
         }
+    }
+
+    pub async fn execute_stream(&self, task_description: &str) -> Result<LlmStream, AgentError> {
+        info!("GeneralWorker: streaming response");
+        self.client.chat_stream(GENERAL_WORKER_PROMPT, task_description).await
     }
 }
 
@@ -36,7 +41,7 @@ impl Worker for GeneralWorker {
             .unwrap_or_else(|| task_description.to_string());
 
         match self.client.chat(GENERAL_WORKER_PROMPT, &context).await {
-            Ok(output) => Ok(WorkerResult::ok(output)),
+            Ok(resp) => Ok(WorkerResult::ok(resp.content)),
             Err(e) => Ok(WorkerResult::err(e)),
         }
     }

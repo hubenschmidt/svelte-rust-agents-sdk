@@ -1,3 +1,20 @@
+pub const FRONTLINE_DECISION_PROMPT: &str = r#"Analyze the user's request and decide if it needs specialized capabilities.
+
+Route to orchestrator ONLY for:
+- WEB SEARCH: Finding current information, researching topics
+- SEND EMAIL: Composing and sending emails
+
+For everything else (greetings, questions, conversation, math, jokes), you handle directly.
+
+Respond with JSON:
+{"should_route": true} or {"should_route": false}
+
+Nothing else."#;
+
+pub const FRONTLINE_RESPONSE_PROMPT: &str = r#"You are a friendly, helpful conversational assistant.
+Respond naturally and helpfully to the user's message.
+Be concise but complete. Use a warm, professional tone."#;
+
 pub const FRONTLINE_PROMPT: &str = r#"You are a helpful conversational assistant that handles user requests.
 
 For most requests, respond directly with helpful, friendly answers.

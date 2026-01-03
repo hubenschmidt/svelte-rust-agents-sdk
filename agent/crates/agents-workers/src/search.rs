@@ -1,5 +1,5 @@
 use agents_core::{AgentError, Worker, WorkerResult, WorkerType};
-use agents_llm::LlmClient;
+use agents_llm::{LlmClient, LlmStream};
 use async_trait::async_trait;
 use serde::Deserialize;
 use tracing::info;
@@ -75,6 +75,34 @@ impl SearchWorker {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+
+    pub async fn execute_stream(
+        &self,
+        task_description: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<LlmStream, AgentError> {
+        info!("SearchWorker: streaming response");
+
+        let query = parameters
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or(task_description);
+
+        let num_results = parameters
+            .get("num_results")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u8)
+            .unwrap_or(5);
+
+        let search_results = self.search(query, num_results).await?;
+
+        let context = format!(
+            "Task: {task_description}\n\nSearch Results:\n{}\n\nSynthesize these results into a clear response.",
+            Self::format_results(&search_results)
+        );
+
+        self.client.chat_stream(SEARCH_WORKER_PROMPT, &context).await
+    }
 }
 
 #[async_trait]
@@ -117,7 +145,7 @@ impl Worker for SearchWorker {
         );
 
         match self.client.chat(SEARCH_WORKER_PROMPT, &context).await {
-            Ok(output) => Ok(WorkerResult::ok(output)),
+            Ok(resp) => Ok(WorkerResult::ok(resp.content)),
             Err(e) => Ok(WorkerResult::err(e)),
         }
     }

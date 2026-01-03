@@ -1,5 +1,5 @@
 use agents_core::{AgentError, Worker, WorkerResult, WorkerType};
-use agents_llm::LlmClient;
+use agents_llm::{LlmClient, LlmStream};
 use async_trait::async_trait;
 use serde::Serialize;
 use tracing::info;
@@ -82,6 +82,36 @@ impl EmailWorker {
 
         Ok(status)
     }
+
+    /// Stream email body composition. Returns None if body is already provided (no LLM needed).
+    pub async fn compose_stream(
+        &self,
+        task_description: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<Option<LlmStream>, AgentError> {
+        let body_param = parameters.get("body").and_then(|v| v.as_str()).unwrap_or("");
+
+        if !body_param.is_empty() {
+            return Ok(None);
+        }
+
+        info!("EmailWorker: streaming body composition");
+
+        let to = parameters.get("to").and_then(|v| v.as_str()).unwrap_or("");
+        let subject = parameters.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+
+        let context = format!(
+            "Task: {task_description}\n\nTo: {to}\nSubject: {subject}\n\nCompose the email content."
+        );
+
+        let stream = self.client.chat_stream(EMAIL_WORKER_PROMPT, &context).await?;
+        Ok(Some(stream))
+    }
+
+    pub async fn send(&self, to: &str, subject: &str, body: &str) -> Result<String, AgentError> {
+        let status = self.send_email(to, subject, body).await?;
+        Ok(format!("Email sent to {}\nSubject: {}\nStatus: {}", to, subject, status))
+    }
 }
 
 #[async_trait]
@@ -112,7 +142,7 @@ impl Worker for EmailWorker {
             );
 
             match self.client.chat(EMAIL_WORKER_PROMPT, &context).await {
-                Ok(output) => output,
+                Ok(resp) => resp.content,
                 Err(e) => return Ok(WorkerResult::err(e)),
             }
         } else {

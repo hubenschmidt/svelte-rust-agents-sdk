@@ -1,16 +1,26 @@
-use agents_core::{AgentError, Message, OrchestratorDecision};
-use agents_workers::WorkerRegistry;
+use agents_core::{AgentError, Message, OrchestratorDecision, WorkerType};
+use agents_llm::LlmStream;
+use agents_workers::{EmailWorker, GeneralWorker, SearchWorker, WorkerRegistry};
 use tracing::info;
 
 use crate::{Evaluator, Frontline, Orchestrator};
 
 const MAX_RETRIES: usize = 3;
 
+pub enum StreamResponse {
+    Complete(String),
+    Stream(LlmStream),
+}
+
 pub struct PipelineRunner {
     frontline: Frontline,
     orchestrator: Orchestrator,
     evaluator: Evaluator,
     workers: WorkerRegistry,
+    // Concrete workers for streaming
+    general_worker: GeneralWorker,
+    search_worker: Option<SearchWorker>,
+    email_worker: Option<EmailWorker>,
 }
 
 impl PipelineRunner {
@@ -19,12 +29,18 @@ impl PipelineRunner {
         orchestrator: Orchestrator,
         evaluator: Evaluator,
         workers: WorkerRegistry,
+        general_worker: GeneralWorker,
+        search_worker: Option<SearchWorker>,
+        email_worker: Option<EmailWorker>,
     ) -> Self {
         Self {
             frontline,
             orchestrator,
             evaluator,
             workers,
+            general_worker,
+            search_worker,
+            email_worker,
         }
     }
 
@@ -32,6 +48,7 @@ impl PipelineRunner {
         &self,
         user_input: &str,
         history: &[Message],
+        use_evaluator: bool,
     ) -> Result<String, AgentError> {
         let (should_route, response) = self.frontline.process(user_input, history).await?;
 
@@ -46,7 +63,79 @@ impl PipelineRunner {
             decision.worker_type
         );
 
+        if !use_evaluator {
+            return self.execute_without_evaluation(decision).await;
+        }
+
         self.execute_with_evaluation(decision).await
+    }
+
+    pub async fn process_stream(
+        &self,
+        user_input: &str,
+        history: &[Message],
+    ) -> Result<StreamResponse, AgentError> {
+        // Try frontline streaming first
+        let frontline_stream = self.frontline.process_stream(user_input, history).await?;
+        if let Some(stream) = frontline_stream {
+            return Ok(StreamResponse::Stream(stream));
+        }
+
+        // Frontline decided to route - go to orchestrator
+        let decision = self.orchestrator.route(user_input, history).await?;
+        info!("ORCHESTRATOR (stream): Routing to {:?}", decision.worker_type);
+
+        self.execute_worker_stream(decision).await
+    }
+
+    async fn execute_worker_stream(
+        &self,
+        decision: OrchestratorDecision,
+    ) -> Result<StreamResponse, AgentError> {
+        match decision.worker_type {
+            WorkerType::General => {
+                let stream = self.general_worker.execute_stream(&decision.task_description).await?;
+                Ok(StreamResponse::Stream(stream))
+            }
+            WorkerType::Search => {
+                let Some(ref worker) = self.search_worker else {
+                    return Ok(StreamResponse::Complete("Search worker not configured".into()));
+                };
+                let stream = worker.execute_stream(&decision.task_description, &decision.parameters).await?;
+                Ok(StreamResponse::Stream(stream))
+            }
+            WorkerType::Email => {
+                let Some(ref worker) = self.email_worker else {
+                    return Ok(StreamResponse::Complete("Email worker not configured".into()));
+                };
+                // Email worker streams the body composition, then we need to send the email
+                // For now, fall back to non-streaming since email needs full body before sending
+                let result = self.execute_without_evaluation(decision).await?;
+                Ok(StreamResponse::Complete(result))
+            }
+        }
+    }
+
+    async fn execute_without_evaluation(
+        &self,
+        decision: OrchestratorDecision,
+    ) -> Result<String, AgentError> {
+        let worker_result = self
+            .workers
+            .execute(
+                decision.worker_type,
+                &decision.task_description,
+                &decision.parameters,
+                None,
+            )
+            .await?;
+
+        if !worker_result.success {
+            let error = worker_result.error.unwrap_or_else(|| "Unknown error".into());
+            return Ok(format!("Error: {}", error));
+        }
+
+        Ok(worker_result.output)
     }
 
     async fn execute_with_evaluation(

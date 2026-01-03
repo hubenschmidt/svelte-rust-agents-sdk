@@ -1,5 +1,5 @@
-import { writable } from 'svelte/store';
-import type { ChatMsg, WsPayload, WsResponse } from '$lib/types';
+import { writable, get } from 'svelte/store';
+import type { ChatMsg, WsPayload, WsResponse, WsMetadata } from '$lib/types';
 
 function createChatStore() {
 	const messages = writable<ChatMsg[]>([
@@ -7,6 +7,7 @@ function createChatStore() {
 	]);
 	const isConnected = writable(false);
 	const isStreaming = writable(false);
+	const useEvaluator = writable(true);
 
 	let ws: WebSocket | null = null;
 	const uuid = crypto.randomUUID();
@@ -38,7 +39,7 @@ function createChatStore() {
 			}
 
 			if (data.on_chat_model_end) {
-				handleStreamEnd();
+				handleStreamEnd(data.metadata);
 			}
 		};
 	}
@@ -59,12 +60,12 @@ function createChatStore() {
 		});
 	}
 
-	function handleStreamEnd() {
+	function handleStreamEnd(metadata?: WsMetadata) {
 		isStreaming.set(false);
 		messages.update((msgs) => {
 			const last = msgs[msgs.length - 1];
 			if (last?.streaming) {
-				return [...msgs.slice(0, -1), { ...last, streaming: false }];
+				return [...msgs.slice(0, -1), { ...last, streaming: false, metadata }];
 			}
 			return msgs;
 		});
@@ -75,7 +76,7 @@ function createChatStore() {
 
 		messages.update((msgs) => [...msgs, { user: 'User', msg: text }]);
 
-		const payload: WsPayload = { uuid, message: text };
+		const payload: WsPayload = { uuid, message: text, use_evaluator: get(useEvaluator) };
 		ws.send(JSON.stringify(payload));
 	}
 
@@ -92,6 +93,7 @@ function createChatStore() {
 		messages,
 		isConnected,
 		isStreaming,
+		useEvaluator,
 		connect,
 		send,
 		reset,

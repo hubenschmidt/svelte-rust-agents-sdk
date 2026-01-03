@@ -37,7 +37,7 @@ impl Orchestrator {
             "Conversation History:\n{history_context}\n\nCurrent User Request: {user_input}\n\nAnalyze this request and determine which worker should handle it."
         );
 
-        let decision = self
+        let (decision, _metrics) = self
             .client
             .structured::<OrchestratorDecision>(ORCHESTRATOR_PROMPT, &context)
             .await?;

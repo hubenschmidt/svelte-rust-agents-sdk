@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { chat } from '$lib/stores/chat';
+	import type { WsMetadata } from '$lib/types';
 
-	const { messages, isConnected, isStreaming } = chat;
+	const { messages, isConnected, isStreaming, useEvaluator } = chat;
 	const WS_URL = 'ws://localhost:8000/ws';
 
 	let inputText = '';
@@ -36,12 +37,24 @@
 		event.preventDefault();
 		handleSend();
 	}
+
+	function formatMetadata(m: WsMetadata): string {
+		const secs = (m.elapsed_ms / 1000).toFixed(1);
+		if (m.input_tokens > 0 || m.output_tokens > 0) {
+			return `${secs}s · ${m.input_tokens}/${m.output_tokens} tokens`;
+		}
+		return `${secs}s`;
+	}
 </script>
 
 <div class="app">
 	<header>
 		<div class="status" class:connected={$isConnected}></div>
 		<b>agents-rs</b>
+		<label class="evaluator-toggle">
+			<input type="checkbox" bind:checked={$useEvaluator} />
+			Evaluator
+		</label>
 	</header>
 
 	<main>
@@ -54,6 +67,9 @@
 					class:streaming={message.streaming}
 				>
 					{message.msg}
+					{#if message.user === 'Bot' && message.metadata && !message.streaming}
+						<div class="metadata">{formatMetadata(message.metadata)}</div>
+					{/if}
 				</div>
 			{/each}
 		</div>

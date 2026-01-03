@@ -148,3 +148,24 @@ main {
 .status.connected {
   background: var(--success);
 }
+
+.evaluator-toggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.evaluator-toggle input {
+  cursor: pointer;
+}
+
+.metadata {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}

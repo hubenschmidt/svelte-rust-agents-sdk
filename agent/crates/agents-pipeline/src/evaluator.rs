@@ -27,7 +27,7 @@ impl Evaluator {
             "Task Description: {task_description}\n\nSuccess Criteria: {success_criteria}\n\nWorker Output:\n{worker_output}\n\nEvaluate this output against the success criteria and provide your assessment."
         );
 
-        let result = self
+        let (result, _metrics) = self
             .client
             .structured::<EvaluatorResult>(EVALUATOR_PROMPT, &context)
             .await?;
