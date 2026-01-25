@@ -151,4 +151,17 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
+
+	.status {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: #ef4444;
+		margin-right: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.status.connected {
+		background: #22c55e;
+	}
 </style>

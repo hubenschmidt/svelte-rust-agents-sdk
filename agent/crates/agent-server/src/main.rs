@@ -180,6 +180,7 @@ async fn init_server_state() -> ServerState {
     }
 
     let conn = db::init_db("data/pipelines.db").expect("failed to initialize database");
+    db::seed_examples(&conn).expect("failed to seed examples");
     let configs = db::list_user_pipelines(&conn);
     info!("Loaded {} saved configs", configs.len());
 
