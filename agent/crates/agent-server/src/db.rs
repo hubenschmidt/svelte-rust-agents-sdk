@@ -1,12 +1,17 @@
+//! SQLite persistence layer for user-saved pipeline configurations.
+//!
+//! Provides CRUD operations for pipeline configs and seeds example data on first run.
+
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
-use tracing::{info, error};
+use rusqlite::{params, Connection};
+use tracing::{error, info};
 
 use crate::dto::{EdgeInfo, NodeInfo, PipelineInfo, SavePipelineRequest};
 
+/// Initializes the database, creating tables if needed.
 pub fn init_db(path: &str) -> Result<Connection> {
     if let Some(parent) = Path::new(path).parent() {
         fs::create_dir_all(parent).context("failed to create db directory")?;
@@ -26,6 +31,7 @@ pub fn init_db(path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Lists all user-saved pipeline configurations.
 pub fn list_user_pipelines(conn: &Connection) -> Vec<PipelineInfo> {
     let mut stmt = match conn.prepare("SELECT id, name, description, config_json FROM user_pipelines") {
         Ok(s) => s,
@@ -62,6 +68,7 @@ pub fn list_user_pipelines(conn: &Connection) -> Vec<PipelineInfo> {
     }).collect()
 }
 
+/// Saves or updates a pipeline configuration.
 pub fn save_pipeline(conn: &Connection, req: &SavePipelineRequest) -> Result<()> {
     let config = StoredConfig {
         nodes: req.nodes.clone(),
@@ -77,6 +84,7 @@ pub fn save_pipeline(conn: &Connection, req: &SavePipelineRequest) -> Result<()>
     Ok(())
 }
 
+/// Deletes a pipeline configuration by ID.
 pub fn delete_pipeline(conn: &Connection, id: &str) -> Result<()> {
     conn.execute("DELETE FROM user_pipelines WHERE id = ?1", params![id])
         .context("failed to delete pipeline")?;

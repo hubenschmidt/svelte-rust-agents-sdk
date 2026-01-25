@@ -1,36 +1,42 @@
+//! Data transfer objects for HTTP and WebSocket message serialization.
+
+use std::collections::HashMap;
 use std::fmt;
 
 use agent_core::{Message, ModelConfig};
 use serde::{Deserialize, Serialize};
 
-// === HTTP DTOs ===
+// === HTTP Request/Response Types ===
 
+/// Request to warm up a model.
 #[derive(Debug, Deserialize)]
 pub struct WakeRequest {
     pub model_id: String,
     pub previous_model_id: Option<String>,
 }
 
+/// Response from model warmup.
 #[derive(Debug, Serialize)]
 pub struct WakeResponse {
     pub success: bool,
     pub model: String,
 }
 
+/// Request to unload a model.
 #[derive(Debug, Deserialize)]
 pub struct UnloadRequest {
     pub model_id: String,
 }
 
+/// Response from model unload.
 #[derive(Debug, Serialize)]
 pub struct UnloadResponse {
     pub success: bool,
 }
 
-// === WebSocket DTOs ===
+// === WebSocket Message Types ===
 
-use std::collections::HashMap;
-
+/// Runtime node configuration from the frontend.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RuntimeNodeConfig {
     pub id: String,
@@ -42,6 +48,7 @@ pub struct RuntimeNodeConfig {
     pub prompt: Option<String>,
 }
 
+/// Runtime edge configuration from the frontend.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RuntimeEdgeConfig {
     pub from: serde_json::Value,
@@ -50,12 +57,14 @@ pub struct RuntimeEdgeConfig {
     pub edge_type: Option<String>,
 }
 
+/// Complete runtime pipeline configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RuntimePipelineConfig {
     pub nodes: Vec<RuntimeNodeConfig>,
     pub edges: Vec<RuntimeEdgeConfig>,
 }
 
+/// Incoming WebSocket message payload.
 #[derive(Debug, Deserialize)]
 pub struct WsPayload {
     pub uuid: Option<String>,
@@ -75,6 +84,9 @@ pub struct WsPayload {
     pub pipeline_config: Option<RuntimePipelineConfig>,
 }
 
+// === Pipeline Info Types ===
+
+/// Node information for API responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     pub id: String,
@@ -83,6 +95,7 @@ pub struct NodeInfo {
     pub prompt: Option<String>,
 }
 
+/// Edge information for API responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeInfo {
     pub from: serde_json::Value,
@@ -91,6 +104,7 @@ pub struct EdgeInfo {
     pub edge_type: Option<String>,
 }
 
+/// Complete pipeline information for API responses.
 #[derive(Debug, Clone, Serialize)]
 pub struct PipelineInfo {
     pub id: String,
@@ -100,8 +114,9 @@ pub struct PipelineInfo {
     pub edges: Vec<EdgeInfo>,
 }
 
-// === Pipeline CRUD DTOs ===
+// === Pipeline CRUD Types ===
 
+/// Request to save a pipeline configuration.
 #[derive(Debug, Deserialize)]
 pub struct SavePipelineRequest {
     pub id: String,
@@ -112,17 +127,20 @@ pub struct SavePipelineRequest {
     pub edges: Vec<EdgeInfo>,
 }
 
+/// Response from saving a pipeline.
 #[derive(Debug, Serialize)]
 pub struct SavePipelineResponse {
     pub success: bool,
     pub id: String,
 }
 
+/// Request to delete a pipeline.
 #[derive(Debug, Deserialize)]
 pub struct DeletePipelineRequest {
     pub id: String,
 }
 
+/// Response sent on WebSocket connection init.
 #[derive(Debug, Serialize)]
 pub struct InitResponse {
     pub models: Vec<ModelConfig>,
@@ -130,6 +148,7 @@ pub struct InitResponse {
     pub configs: Vec<PipelineInfo>,
 }
 
+/// Metadata about an LLM response (timing, tokens).
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct WsMetadata {
     pub input_tokens: u32,
@@ -155,6 +174,7 @@ impl fmt::Display for WsMetadata {
     }
 }
 
+/// Outgoing WebSocket message types.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum WsResponse {
@@ -164,22 +184,18 @@ pub enum WsResponse {
 }
 
 impl WsResponse {
+    /// Creates a streaming content chunk response.
     pub fn stream(content: &str) -> Self {
-        Self::Stream {
-            on_chat_model_stream: content.to_string(),
-        }
+        Self::Stream { on_chat_model_stream: content.to_string() }
     }
 
+    /// Creates an end-of-stream response with metadata.
     pub fn end_with_metadata(metadata: WsMetadata) -> Self {
-        Self::End {
-            on_chat_model_end: true,
-            metadata: Some(metadata),
-        }
+        Self::End { on_chat_model_end: true, metadata: Some(metadata) }
     }
 
+    /// Creates a model status update response.
     pub fn model_status(status: &str) -> Self {
-        Self::ModelStatus {
-            model_status: status.to_string(),
-        }
+        Self::ModelStatus { model_status: status.to_string() }
     }
 }

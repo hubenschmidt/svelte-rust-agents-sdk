@@ -1,11 +1,13 @@
+//! Core domain types, error definitions, and worker trait.
+//!
+//! This crate defines the fundamental types shared across the agent system:
+//! errors, worker abstractions, message types, and model configuration.
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Error
-// ─────────────────────────────────────────────────────────────────────────────
-
+/// Errors that can occur during agent operations.
 #[derive(Error, Debug)]
 pub enum AgentError {
     #[error("LLM request failed: {0}")]
@@ -36,10 +38,7 @@ impl From<serde_json::Error> for AgentError {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
+/// Types of workers that can execute tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum WorkerType {
@@ -48,12 +47,14 @@ pub enum WorkerType {
     General,
 }
 
+/// A handoff request to transfer work to another worker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Handoff {
     pub target: WorkerType,
     pub context: String,
 }
 
+/// Decision made by the orchestrator about which worker to use.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorDecision {
     pub worker_type: WorkerType,
@@ -62,6 +63,7 @@ pub struct OrchestratorDecision {
     pub success_criteria: String,
 }
 
+/// Result of an evaluator checking work quality.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluatorResult {
     pub passed: bool,
@@ -71,6 +73,7 @@ pub struct EvaluatorResult {
     pub suggestions: String,
 }
 
+/// Result returned by a worker after execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerResult {
     pub success: bool,
@@ -82,14 +85,17 @@ pub struct WorkerResult {
 }
 
 impl WorkerResult {
+    /// Creates a successful result with the given output.
     pub fn ok(output: String) -> Self {
         Self { success: true, output, error: None, handoff: None }
     }
 
+    /// Creates a failed result with the given error.
     pub fn err(e: impl ToString) -> Self {
         Self { success: false, output: String::new(), error: Some(e.to_string()), handoff: None }
     }
 
+    /// Creates a result that hands off to another worker.
     pub fn handoff(target: WorkerType, context: String) -> Self {
         Self {
             success: true,
@@ -100,6 +106,7 @@ impl WorkerResult {
     }
 }
 
+/// Parameters for sending an email.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailParams {
     pub to: String,
@@ -107,6 +114,7 @@ pub struct EmailParams {
     pub body: String,
 }
 
+/// Parameters for a search query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchParams {
     pub query: String,
@@ -118,6 +126,7 @@ fn default_num_results() -> u8 {
     5
 }
 
+/// Role of a message in a conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageRole {
@@ -125,18 +134,21 @@ pub enum MessageRole {
     Assistant,
 }
 
+/// A single message in a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: MessageRole,
     pub content: String,
 }
 
+/// Decision made by the frontline agent about routing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontlineDecision {
     pub should_route: bool,
     pub response: String,
 }
 
+/// Configuration for an LLM model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub id: String,
@@ -145,14 +157,13 @@ pub struct ModelConfig {
     pub api_base: Option<String>,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Worker Trait
-// ─────────────────────────────────────────────────────────────────────────────
-
+/// Trait for workers that can execute tasks.
 #[async_trait]
 pub trait Worker: Send + Sync {
+    /// Returns the type of this worker.
     fn worker_type(&self) -> WorkerType;
 
+    /// Executes a task with the given parameters.
     async fn execute(
         &self,
         task_description: &str,

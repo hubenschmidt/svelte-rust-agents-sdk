@@ -1,4 +1,10 @@
+//! Native Ollama API client for model discovery, loading, and verbose metrics.
+//!
+//! Uses Ollama's native /api/chat endpoint (not OpenAI-compatible) to access
+//! detailed performance metrics like tokens/sec, eval time, and load duration.
+
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 use agent_core::{AgentError, Message, MessageRole, ModelConfig};
 use futures::Stream;
@@ -8,27 +14,19 @@ use tracing::info;
 
 use crate::StreamChunk;
 
-// === Model Discovery ===
-
+/// Response from Ollama's /api/tags endpoint.
 #[derive(Debug, Deserialize)]
 pub struct OllamaTagsResponse {
     pub models: Vec<OllamaModelInfo>,
 }
 
+/// Information about a single Ollama model.
 #[derive(Debug, Deserialize)]
 pub struct OllamaModelInfo {
     pub name: String,
-    #[serde(default)]
-    pub details: OllamaModelDetails,
 }
 
-#[derive(Debug, Deserialize, Default)]
-#[allow(dead_code)]
-pub struct OllamaModelDetails {
-    pub parameter_size: Option<String>,
-    pub family: Option<String>,
-}
-
+/// Discovers available models from an Ollama instance.
 pub async fn discover_models(ollama_host: &str) -> Result<Vec<ModelConfig>, AgentError> {
     let client = Client::new();
     let url = format!("{}/api/tags", ollama_host.trim_end_matches('/'));
@@ -49,7 +47,7 @@ pub async fn discover_models(ollama_host: &str) -> Result<Vec<ModelConfig>, Agen
         .models
         .into_iter()
         .map(|m| {
-            let display_name = format_display_name(&m.name, &m.details);
+            let display_name = format_display_name(&m.name);
             let id = format!("ollama-{}", slugify(&m.name));
             ModelConfig {
                 id,
@@ -64,6 +62,7 @@ pub async fn discover_models(ollama_host: &str) -> Result<Vec<ModelConfig>, Agen
     Ok(models)
 }
 
+/// Unloads a model from Ollama's memory.
 pub async fn unload_model(ollama_host: &str, model_name: &str) -> Result<(), AgentError> {
     let client = Client::new();
     let url = format!("{}/api/chat", ollama_host.trim_end_matches('/'));
@@ -86,7 +85,8 @@ pub async fn unload_model(ollama_host: &str, model_name: &str) -> Result<(), Age
     Ok(())
 }
 
-fn format_display_name(model_name: &str, _details: &OllamaModelDetails) -> String {
+/// Formats a model name for display (e.g., "llama3:8b" -> "Llama3:8b (Local)").
+fn format_display_name(model_name: &str) -> String {
     let last_segment = model_name.rsplit('/').next().unwrap_or(model_name);
     let (base, tag) = last_segment.split_once(':').unwrap_or((last_segment, ""));
 
@@ -100,6 +100,7 @@ fn format_display_name(model_name: &str, _details: &OllamaModelDetails) -> Strin
     format!("{display_base}{tag_suffix} (Local)")
 }
 
+/// Converts a model name to a URL-safe slug.
 fn slugify(name: &str) -> String {
     name.to_lowercase()
         .replace(['/', ':', '.'], "-")
@@ -108,6 +109,7 @@ fn slugify(name: &str) -> String {
         .to_string()
 }
 
+/// Performance metrics from Ollama's native API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OllamaMetrics {
     #[serde(default)]
@@ -125,6 +127,7 @@ pub struct OllamaMetrics {
 }
 
 impl OllamaMetrics {
+    /// Calculates tokens generated per second.
     pub fn tokens_per_sec(&self) -> f64 {
         if self.eval_duration == 0 {
             return 0.0;
@@ -132,18 +135,22 @@ impl OllamaMetrics {
         (self.eval_count as f64) / (self.eval_duration as f64 / 1_000_000_000.0)
     }
 
+    /// Total request duration in milliseconds.
     pub fn total_duration_ms(&self) -> u64 {
         self.total_duration / 1_000_000
     }
 
+    /// Model load time in milliseconds.
     pub fn load_duration_ms(&self) -> u64 {
         self.load_duration / 1_000_000
     }
 
+    /// Prompt evaluation time in milliseconds.
     pub fn prompt_eval_ms(&self) -> u64 {
         self.prompt_eval_duration / 1_000_000
     }
 
+    /// Token generation time in milliseconds.
     pub fn eval_ms(&self) -> u64 {
         self.eval_duration / 1_000_000
     }
@@ -175,6 +182,7 @@ struct OllamaResponseMessage {
     content: String,
 }
 
+/// Client for Ollama's native API with detailed metrics support.
 pub struct OllamaClient {
     client: Client,
     api_base: String,
@@ -182,6 +190,7 @@ pub struct OllamaClient {
 }
 
 impl OllamaClient {
+    /// Creates a new client for the given model and Ollama API base URL.
     pub fn new(model: &str, api_base: &str) -> Self {
         let base = api_base
             .trim_end_matches('/')
@@ -194,6 +203,7 @@ impl OllamaClient {
         }
     }
 
+    /// Builds the message list for an Ollama chat request.
     fn build_messages(system_prompt: &str, history: &[Message], user_input: &str) -> Vec<OllamaMessage> {
         let mut messages = vec![OllamaMessage {
             role: "system".to_string(),
@@ -219,6 +229,7 @@ impl OllamaClient {
         messages
     }
 
+    /// Sends a non-streaming chat request, returns content and metrics.
     pub async fn chat_with_metrics(
         &self,
         system_prompt: &str,
@@ -246,10 +257,7 @@ impl OllamaClient {
             .await
             .map_err(|e| AgentError::LlmError(e.to_string()))?;
 
-        let content = resp
-            .message
-            .map(|m| m.content)
-            .unwrap_or_default();
+        let content = resp.message.map(|m| m.content).unwrap_or_default();
 
         info!(
             "Ollama: {}ms total, {:.1} tok/s, {} eval tokens",
@@ -261,6 +269,7 @@ impl OllamaClient {
         Ok((content, resp.metrics))
     }
 
+    /// Sends a streaming chat request, returns a stream and metrics collector.
     pub async fn chat_stream_with_metrics(
         &self,
         system_prompt: &str,
@@ -294,35 +303,35 @@ impl OllamaClient {
         let mapped = stream.filter_map(move |result| {
             let collector = collector_clone.clone();
             async move {
-                match result {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            let line = line.trim();
-                            if line.is_empty() {
-                                continue;
-                            }
+                let bytes = match result {
+                    Ok(b) => b,
+                    Err(e) => return Some(Err(AgentError::LlmError(e.to_string()))),
+                };
 
-                            if let Ok(resp) = serde_json::from_str::<OllamaChatResponse>(line) {
-                                if resp.done {
-                                    collector.set_metrics(resp.metrics);
-                                    return Some(Ok(StreamChunk::Usage {
-                                        input_tokens: collector.get_metrics().prompt_eval_count,
-                                        output_tokens: collector.get_metrics().eval_count,
-                                    }));
-                                }
+                let text = String::from_utf8_lossy(&bytes);
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
 
-                                if let Some(msg) = resp.message {
-                                    if !msg.content.is_empty() {
-                                        return Some(Ok(StreamChunk::Content(msg.content)));
-                                    }
-                                }
+                    if let Ok(resp) = serde_json::from_str::<OllamaChatResponse>(line) {
+                        if resp.done {
+                            collector.set_metrics(resp.metrics);
+                            return Some(Ok(StreamChunk::Usage {
+                                input_tokens: collector.get_metrics().prompt_eval_count,
+                                output_tokens: collector.get_metrics().eval_count,
+                            }));
+                        }
+
+                        if let Some(msg) = resp.message {
+                            if !msg.content.is_empty() {
+                                return Some(Ok(StreamChunk::Content(msg.content)));
                             }
                         }
-                        None
                     }
-                    Err(e) => Some(Err(AgentError::LlmError(e.to_string()))),
                 }
+                None
             }
         });
 
@@ -330,29 +339,30 @@ impl OllamaClient {
     }
 }
 
+/// Collects metrics from a streaming Ollama response.
 #[derive(Clone)]
 pub struct OllamaMetricsCollector {
-    metrics: std::sync::Arc<std::sync::Mutex<OllamaMetrics>>,
+    metrics: Arc<Mutex<OllamaMetrics>>,
 }
 
 impl OllamaMetricsCollector {
+    /// Creates a new metrics collector.
     pub fn new() -> Self {
         Self {
-            metrics: std::sync::Arc::new(std::sync::Mutex::new(OllamaMetrics::default())),
+            metrics: Arc::new(Mutex::new(OllamaMetrics::default())),
         }
     }
 
+    /// Stores the final metrics from a completed stream.
     pub fn set_metrics(&self, metrics: OllamaMetrics) {
         if let Ok(mut m) = self.metrics.lock() {
             *m = metrics;
         }
     }
 
+    /// Retrieves the collected metrics.
     pub fn get_metrics(&self) -> OllamaMetrics {
-        let Ok(guard) = self.metrics.lock() else {
-            return OllamaMetrics::default();
-        };
-        guard.clone()
+        self.metrics.lock().ok().map(|g| g.clone()).unwrap_or_default()
     }
 }
 

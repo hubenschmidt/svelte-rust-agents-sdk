@@ -1,3 +1,5 @@
+//! Application error types and Axum response conversion.
+
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -5,8 +7,9 @@ use axum::{
 };
 use serde::Serialize;
 
+/// Application-level errors with HTTP status code mapping.
 #[derive(Debug)]
-#[allow(dead_code)] // allow this for now because we want to use the variants below for future endpoints
+#[allow(dead_code)]
 pub enum AppError {
     NotFound(String),
     BadRequest(String),

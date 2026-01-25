@@ -1,3 +1,8 @@
+//! OpenAI-compatible chat client with streaming support.
+//!
+//! Works with OpenAI API and any compatible endpoint (including Ollama's /v1 endpoint).
+//! Supports regular chat, streaming, and structured JSON output.
+
 use std::pin::Pin;
 use std::time::Instant;
 
@@ -16,13 +21,16 @@ use futures::Stream;
 use serde::de::DeserializeOwned;
 use tracing::{debug, info};
 
+/// A chunk from a streaming LLM response.
 pub enum StreamChunk {
     Content(String),
     Usage { input_tokens: u32, output_tokens: u32 },
 }
 
+/// A stream of LLM response chunks.
 pub type LlmStream = Pin<Box<dyn Stream<Item = Result<StreamChunk, AgentError>> + Send>>;
 
+/// Token usage and timing metrics from an LLM call.
 #[derive(Debug, Clone, Default)]
 pub struct LlmMetrics {
     pub input_tokens: u32,
@@ -30,16 +38,19 @@ pub struct LlmMetrics {
     pub elapsed_ms: u64,
 }
 
+/// Complete response from an LLM call.
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
     pub content: String,
     pub metrics: LlmMetrics,
 }
 
+/// Converts any error into an AgentError::LlmError.
 fn llm_err(e: impl ToString) -> AgentError {
     AgentError::LlmError(e.to_string())
 }
 
+/// Builds the message list for a simple system + user request.
 fn build_messages(
     system_prompt: &str,
     user_input: &str,
@@ -60,6 +71,7 @@ fn build_messages(
     ])
 }
 
+/// Extracts content and metrics from a completion response.
 fn extract_response(response: CreateChatCompletionResponse, elapsed_ms: u64) -> Result<LlmResponse, AgentError> {
     let content = response
         .choices
@@ -70,7 +82,7 @@ fn extract_response(response: CreateChatCompletionResponse, elapsed_ms: u64) -> 
 
     let (input_tokens, output_tokens) = response
         .usage
-        .map(|u| (u.prompt_tokens as u32, u.completion_tokens as u32))
+        .map(|u| (u.prompt_tokens, u.completion_tokens))
         .unwrap_or((0, 0));
 
     info!(
@@ -80,20 +92,18 @@ fn extract_response(response: CreateChatCompletionResponse, elapsed_ms: u64) -> 
 
     Ok(LlmResponse {
         content,
-        metrics: LlmMetrics {
-            input_tokens,
-            output_tokens,
-            elapsed_ms,
-        },
+        metrics: LlmMetrics { input_tokens, output_tokens, elapsed_ms },
     })
 }
 
+/// Client for OpenAI-compatible chat completion APIs.
 pub struct LlmClient {
     client: Client<OpenAIConfig>,
     default_model: String,
 }
 
 impl LlmClient {
+    /// Creates a new client for the given model and optional API base URL.
     pub fn new(model: &str, api_base: Option<&str>) -> Self {
         let config = match api_base {
             Some(base) => OpenAIConfig::new()
@@ -108,6 +118,7 @@ impl LlmClient {
         }
     }
 
+    /// Sends a chat request and returns the complete response.
     pub async fn chat(&self, system_prompt: &str, user_input: &str) -> Result<LlmResponse, AgentError> {
         let start = Instant::now();
         let messages = build_messages(system_prompt, user_input)?;
@@ -122,7 +133,13 @@ impl LlmClient {
         extract_response(response, start.elapsed().as_millis() as u64)
     }
 
-    pub async fn chat_stream(&self, system_prompt: &str, history: &[Message], user_input: &str) -> Result<LlmStream, AgentError> {
+    /// Sends a chat request with history and returns a stream of chunks.
+    pub async fn chat_stream(
+        &self,
+        system_prompt: &str,
+        history: &[Message],
+        user_input: &str,
+    ) -> Result<LlmStream, AgentError> {
         use futures::StreamExt;
 
         let mut messages = vec![
@@ -173,8 +190,8 @@ impl LlmClient {
                 Ok(response) => {
                     if let Some(usage) = response.usage {
                         return Some(Ok(StreamChunk::Usage {
-                            input_tokens: usage.prompt_tokens as u32,
-                            output_tokens: usage.completion_tokens as u32,
+                            input_tokens: usage.prompt_tokens,
+                            output_tokens: usage.completion_tokens,
                         }));
                     }
                     let chunk = response.choices.first()?.delta.content.clone()?;
@@ -187,6 +204,7 @@ impl LlmClient {
         Ok(Box::pin(mapped))
     }
 
+    /// Sends a chat request expecting a JSON response, parses into the given type.
     pub async fn structured<T: DeserializeOwned>(
         &self,
         system_prompt: &str,

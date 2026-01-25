@@ -1,3 +1,8 @@
+//! HTTP/WebSocket server entry point and Axum router setup.
+//!
+//! Initializes the server state (models, presets, database), configures routes,
+//! and starts the Axum server on port 8000.
+
 mod db;
 mod dto;
 mod error;
@@ -27,6 +32,7 @@ use tracing::{info, warn};
 
 const OLLAMA_HOST: &str = "http://host.docker.internal:11434";
 
+/// Returns the list of cloud-hosted models (e.g., OpenAI).
 fn cloud_models() -> Vec<ModelConfig> {
     vec![ModelConfig {
         id: "openai-gpt4o".into(),
@@ -36,6 +42,7 @@ fn cloud_models() -> Vec<ModelConfig> {
     }]
 }
 
+/// Shared server state accessible from all handlers.
 pub struct ServerState {
     pub models: Vec<ModelConfig>,
     pub presets: PresetRegistry,
@@ -45,6 +52,7 @@ pub struct ServerState {
 }
 
 impl ServerState {
+    /// Gets a model by ID, falling back to the first available model.
     pub fn get_model(&self, model_id: &str) -> ModelConfig {
         self.models
             .iter()
@@ -52,6 +60,14 @@ impl ServerState {
             .or_else(|| self.models.first())
             .cloned()
             .expect("at least one model must be configured")
+    }
+
+    /// Acquires the database lock, converting poison errors to AppError.
+    pub fn db_lock(&self) -> Result<std::sync::MutexGuard<'_, rusqlite::Connection>, error::AppError> {
+        self.db.lock().map_err(|e| {
+            tracing::error!("DB lock poisoned: {}", e);
+            error::AppError::Internal("database lock error".into())
+        })
     }
 }
 
@@ -116,6 +132,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Initializes the server state: discovers models, loads presets, and seeds the database.
 async fn init_server_state() -> ServerState {
     let discovery_future = discover_models(OLLAMA_HOST);
 

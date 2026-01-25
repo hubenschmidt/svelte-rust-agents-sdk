@@ -1,12 +1,15 @@
+//! Pipeline CRUD HTTP handlers.
+
 use std::sync::Arc;
 
 use axum::{extract::State, Json};
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::dto::{DeletePipelineRequest, PipelineInfo, SavePipelineRequest, SavePipelineResponse};
 use crate::error::AppError;
 use crate::ServerState;
 
+/// Lists all saved pipeline configurations.
 pub async fn list(
     State(state): State<Arc<ServerState>>,
 ) -> Json<Vec<PipelineInfo>> {
@@ -14,23 +17,19 @@ pub async fn list(
     Json(configs.clone())
 }
 
+/// Saves a pipeline configuration.
 pub async fn save(
     State(state): State<Arc<ServerState>>,
     Json(req): Json<SavePipelineRequest>,
 ) -> Result<Json<SavePipelineResponse>, AppError> {
     info!("Saving pipeline config: {} ({})", req.name, req.id);
 
-    let db_result = {
-        let db = state.db.lock().map_err(|e| {
-            error!("DB lock poisoned: {}", e);
-            AppError::Internal("database lock error".into())
+    {
+        let db = state.db_lock()?;
+        crate::db::save_pipeline(&db, &req).map_err(|e| {
+            error!("Failed to save pipeline: {}", e);
+            AppError::Internal(format!("save failed: {}", e))
         })?;
-        crate::db::save_pipeline(&db, &req)
-    };
-
-    if let Err(e) = db_result {
-        error!("Failed to save pipeline: {}", e);
-        return Err(AppError::Internal(format!("save failed: {}", e)));
     }
 
     let new_info = PipelineInfo {
@@ -42,33 +41,29 @@ pub async fn save(
     };
 
     let mut configs = state.configs.write().await;
-    let existing = configs.iter().position(|p| p.id == new_info.id);
-    match existing {
-        Some(idx) => configs[idx] = new_info,
-        None => configs.push(new_info),
+    if let Some(idx) = configs.iter().position(|p| p.id == new_info.id) {
+        configs[idx] = new_info;
+    } else {
+        configs.push(new_info);
     }
 
     info!("Pipeline config saved successfully: {}", req.id);
     Ok(Json(SavePipelineResponse { success: true, id: req.id }))
 }
 
+/// Deletes a pipeline configuration.
 pub async fn delete(
     State(state): State<Arc<ServerState>>,
     Json(req): Json<DeletePipelineRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     info!("Deleting pipeline config: {}", req.id);
 
-    let db_result = {
-        let db = state.db.lock().map_err(|e| {
-            error!("DB lock poisoned: {}", e);
-            AppError::Internal("database lock error".into())
+    {
+        let db = state.db_lock()?;
+        crate::db::delete_pipeline(&db, &req.id).map_err(|e| {
+            error!("Failed to delete pipeline: {}", e);
+            AppError::Internal(format!("delete failed: {}", e))
         })?;
-        crate::db::delete_pipeline(&db, &req.id)
-    };
-
-    if let Err(e) = db_result {
-        error!("Failed to delete pipeline: {}", e);
-        return Err(AppError::Internal(format!("delete failed: {}", e)));
     }
 
     let mut configs = state.configs.write().await;

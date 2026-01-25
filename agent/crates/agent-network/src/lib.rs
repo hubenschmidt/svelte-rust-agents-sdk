@@ -1,3 +1,8 @@
+//! LLM client abstractions for OpenAI-compatible and native Ollama APIs.
+//!
+//! Provides streaming and non-streaming chat completions, model discovery,
+//! and metrics collection for local Ollama models.
+
 mod client;
 mod ollama;
 

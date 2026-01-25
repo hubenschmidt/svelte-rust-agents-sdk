@@ -1,3 +1,9 @@
+//! WebSocket handler for real-time LLM streaming and pipeline execution.
+//!
+//! Handles client connections, message routing, model management commands,
+//! and streaming responses back to the frontend.
+
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,45 +26,29 @@ use crate::dto::{InitResponse, RuntimePipelineConfig, WsMetadata, WsPayload, WsR
 use crate::services::model;
 use crate::ServerState;
 
+/// Result of processing an LLM stream.
 struct StreamResult {
     input_tokens: u32,
     output_tokens: u32,
     ollama_metrics: Option<OllamaMetrics>,
 }
 
+/// Converts a runtime config from the frontend to a PipelineConfig.
 fn runtime_to_pipeline_config(runtime: &RuntimePipelineConfig) -> PipelineConfig {
-    let nodes = runtime.nodes.iter().map(|n| {
-        let node_type = match n.node_type.as_str() {
-            "llm" => NodeType::Llm,
-            "gate" => NodeType::Gate,
-            "router" => NodeType::Router,
-            "coordinator" => NodeType::Coordinator,
-            "aggregator" => NodeType::Aggregator,
-            "orchestrator" => NodeType::Orchestrator,
-            "worker" => NodeType::Worker,
-            "synthesizer" => NodeType::Synthesizer,
-            "evaluator" => NodeType::Evaluator,
-            _ => NodeType::Llm,
-        };
-        NodeConfig {
-            id: n.id.clone(),
-            node_type,
-            model: n.model.clone(),
-            config: serde_json::Value::Null,
-            prompt: n.prompt.clone(),
-        }
+    let nodes = runtime.nodes.iter().map(|n| NodeConfig {
+        id: n.id.clone(),
+        node_type: n.node_type.parse().unwrap_or(NodeType::Llm),
+        model: n.model.clone(),
+        config: serde_json::Value::Null,
+        prompt: n.prompt.clone(),
     }).collect();
 
-    let edges = runtime.edges.iter().map(|e| {
-        let from = json_to_endpoint(&e.from);
-        let to = json_to_endpoint(&e.to);
-        let edge_type = e.edge_type.as_deref().map(|t| match t {
-            "parallel" => EdgeType::Parallel,
-            "dynamic" => EdgeType::Dynamic,
-            "conditional" => EdgeType::Conditional,
-            _ => EdgeType::Direct,
-        }).unwrap_or(EdgeType::Direct);
-        EdgeConfig { from, to, edge_type }
+    let edges = runtime.edges.iter().map(|e| EdgeConfig {
+        from: json_to_endpoint(&e.from),
+        to: json_to_endpoint(&e.to),
+        edge_type: e.edge_type.as_deref()
+            .and_then(|t| t.parse().ok())
+            .unwrap_or(EdgeType::Direct),
     }).collect();
 
     PipelineConfig {
@@ -70,6 +60,7 @@ fn runtime_to_pipeline_config(runtime: &RuntimePipelineConfig) -> PipelineConfig
     }
 }
 
+/// Converts a JSON value to an EdgeEndpoint.
 fn json_to_endpoint(val: &serde_json::Value) -> EdgeEndpoint {
     match val {
         serde_json::Value::String(s) => EdgeEndpoint::Single(s.clone()),
@@ -83,6 +74,7 @@ fn json_to_endpoint(val: &serde_json::Value) -> EdgeEndpoint {
     }
 }
 
+/// Sends a JSON-serialized message over the WebSocket.
 async fn send_json<T: Serialize>(sender: &mut SplitSink<WebSocket, Message>, data: &T) -> bool {
     let Ok(json) = serde_json::to_string(data) else {
         error!("JSON serialization failed");
@@ -91,6 +83,7 @@ async fn send_json<T: Serialize>(sender: &mut SplitSink<WebSocket, Message>, dat
     sender.send(Message::Text(json.into())).await.is_ok()
 }
 
+/// Consumes an LLM stream, forwarding chunks to the client.
 async fn consume_stream(
     sender: &mut SplitSink<WebSocket, Message>,
     mut stream: LlmStream,
@@ -120,12 +113,14 @@ async fn consume_stream(
     (accumulated, input_tokens, output_tokens)
 }
 
+/// Sends an error message to the client.
 async fn send_error(sender: &mut SplitSink<WebSocket, Message>) -> String {
     let error_msg = "Sorry—there was an error generating the response.";
     let _ = send_json(sender, &WsResponse::stream(error_msg)).await;
     error_msg.to_string()
 }
 
+/// Processes a request using Ollama's native API for verbose metrics.
 async fn process_ollama(
     sender: &mut SplitSink<WebSocket, Message>,
     model: &ModelConfig,
@@ -152,15 +147,12 @@ async fn process_ollama(
         Err(e) => {
             error!("Ollama error: {}", e);
             send_error(sender).await;
-            StreamResult {
-                input_tokens: 0,
-                output_tokens: 0,
-                ollama_metrics: None,
-            }
+            StreamResult { input_tokens: 0, output_tokens: 0, ollama_metrics: None }
         }
     }
 }
 
+/// Processes a direct chat request (no pipeline).
 async fn process_direct_chat(
     sender: &mut SplitSink<WebSocket, Message>,
     model: &ModelConfig,
@@ -185,6 +177,7 @@ async fn process_direct_chat(
     }
 }
 
+/// Processes a request through the pipeline engine.
 async fn process_engine(
     sender: &mut SplitSink<WebSocket, Message>,
     config: &PipelineConfig,
@@ -192,7 +185,7 @@ async fn process_engine(
     history: &[CoreMessage],
     models: &[ModelConfig],
     default_model: &ModelConfig,
-    node_overrides: std::collections::HashMap<String, String>,
+    node_overrides: HashMap<String, String>,
 ) -> StreamResult {
     let engine = PipelineEngine::new(
         config.clone(),
@@ -215,15 +208,12 @@ async fn process_engine(
         Err(e) => {
             error!("Engine error: {}", e);
             send_error(sender).await;
-            StreamResult {
-                input_tokens: 0,
-                output_tokens: 0,
-                ollama_metrics: None,
-            }
+            StreamResult { input_tokens: 0, output_tokens: 0, ollama_metrics: None }
         }
     }
 }
 
+/// WebSocket upgrade handler.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<ServerState>>,
@@ -231,14 +221,13 @@ pub async fn ws_handler(
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
+/// Main WebSocket connection handler.
 async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Wait for init message first
+    // Wait for init message
     let uuid = loop {
-        let Some(Ok(msg)) = receiver.next().await else {
-            return;
-        };
+        let Some(Ok(msg)) = receiver.next().await else { return };
         let Message::Text(text) = msg else { continue };
 
         let payload: WsPayload = match serde_json::from_str(&text) {
@@ -267,7 +256,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
         break uuid;
     };
 
-    // Process messages with immutable uuid
+    // Process messages
     while let Some(result) = receiver.next().await {
         let msg = match result {
             Ok(m) => m,
@@ -289,37 +278,24 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
             }
         };
 
+        // Handle model wake request
         if let Some(wake_model_id) = &payload.wake_model_id {
-            if !send_json(&mut sender, &WsResponse::model_status("loading")).await {
-                break;
-            }
-            let prev = payload.unload_model_id.as_deref();
-            match model::warmup(&state, wake_model_id, prev).await {
-                Ok(m) => info!("Model {} ready via WebSocket", m.name),
-                Err(e) => error!("Wake failed: {:?}", e),
-            }
-            if !send_json(&mut sender, &WsResponse::model_status("ready")).await {
+            if !handle_wake(&mut sender, &state, wake_model_id, payload.unload_model_id.as_deref()).await {
                 break;
             }
             continue;
         }
 
+        // Handle model unload request
         if let Some(unload_model_id) = &payload.unload_model_id {
-            if !send_json(&mut sender, &WsResponse::model_status("unloading")).await {
-                break;
-            }
-            if let Err(e) = model::unload(&state, unload_model_id).await {
-                error!("Unload failed: {:?}", e);
-            }
-            if !send_json(&mut sender, &WsResponse::model_status("ready")).await {
+            if !handle_unload(&mut sender, &state, unload_model_id).await {
                 break;
             }
             continue;
         }
 
-        let Some(message) = payload.message else {
-            continue;
-        };
+        // Handle chat message
+        let Some(message) = payload.message else { continue };
 
         let model_id = payload.model_id.as_deref().unwrap_or("");
         let model = state.get_model(model_id);
@@ -331,58 +307,90 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
             message.get(..50).unwrap_or(&message)
         );
 
-        let history = payload.history;
-
         let start = Instant::now();
         let use_ollama_native = payload.verbose && model.api_base.is_some();
 
-        // Priority: runtime config > preset ID > default pipeline
         let result = if use_ollama_native {
-            process_ollama(&mut sender, &model, &history, &message).await
+            process_ollama(&mut sender, &model, &payload.history, &message).await
         } else if let Some(ref runtime_config) = payload.pipeline_config {
             let config = runtime_to_pipeline_config(runtime_config);
             info!("Using runtime pipeline config ({} nodes)", config.nodes.len());
-            process_engine(&mut sender, &config, &message, &history, &state.models, &model, payload.node_models).await
+            process_engine(&mut sender, &config, &message, &payload.history, &state.models, &model, payload.node_models).await
         } else if let Some(config) = payload.pipeline_id.as_deref().and_then(|id| state.presets.get(id)) {
             info!("Using pipeline preset: {}", config.name);
-            process_engine(&mut sender, config, &message, &history, &state.models, &model, payload.node_models).await
+            process_engine(&mut sender, config, &message, &payload.history, &state.models, &model, payload.node_models).await
         } else {
-            process_direct_chat(&mut sender, &model, &history, &message).await
+            process_direct_chat(&mut sender, &model, &payload.history, &message).await
         };
 
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-
-        let metadata = match result.ollama_metrics {
-            Some(m) => {
-                info!(
-                    "Ollama metrics: {:.1} tok/s, {} tokens, {}ms total",
-                    m.tokens_per_sec(),
-                    m.eval_count,
-                    m.total_duration_ms()
-                );
-                WsMetadata {
-                    input_tokens: m.prompt_eval_count,
-                    output_tokens: m.eval_count,
-                    elapsed_ms,
-                    load_duration_ms: Some(m.load_duration_ms()),
-                    prompt_eval_ms: Some(m.prompt_eval_ms()),
-                    eval_ms: Some(m.eval_ms()),
-                    tokens_per_sec: Some(m.tokens_per_sec()),
-                }
-            }
-            None => WsMetadata {
-                input_tokens: result.input_tokens,
-                output_tokens: result.output_tokens,
-                elapsed_ms,
-                ..Default::default()
-            },
-        };
-
+        let metadata = build_metadata(&result, start.elapsed().as_millis() as u64);
         info!("Sending metadata: {:?}", metadata);
+
         if !send_json(&mut sender, &WsResponse::end_with_metadata(metadata)).await {
             break;
         }
     }
 
     info!("Connection closed: {}", uuid);
+}
+
+/// Handles a model wake request.
+async fn handle_wake(
+    sender: &mut SplitSink<WebSocket, Message>,
+    state: &ServerState,
+    model_id: &str,
+    prev_model_id: Option<&str>,
+) -> bool {
+    if !send_json(sender, &WsResponse::model_status("loading")).await {
+        return false;
+    }
+    match model::warmup(state, model_id, prev_model_id).await {
+        Ok(m) => info!("Model {} ready via WebSocket", m.name),
+        Err(e) => error!("Wake failed: {:?}", e),
+    }
+    send_json(sender, &WsResponse::model_status("ready")).await
+}
+
+/// Handles a model unload request.
+async fn handle_unload(
+    sender: &mut SplitSink<WebSocket, Message>,
+    state: &ServerState,
+    model_id: &str,
+) -> bool {
+    if !send_json(sender, &WsResponse::model_status("unloading")).await {
+        return false;
+    }
+    if let Err(e) = model::unload(state, model_id).await {
+        error!("Unload failed: {:?}", e);
+    }
+    send_json(sender, &WsResponse::model_status("ready")).await
+}
+
+/// Builds response metadata from stream result.
+fn build_metadata(result: &StreamResult, elapsed_ms: u64) -> WsMetadata {
+    match &result.ollama_metrics {
+        Some(m) => {
+            info!(
+                "Ollama metrics: {:.1} tok/s, {} tokens, {}ms total",
+                m.tokens_per_sec(),
+                m.eval_count,
+                m.total_duration_ms()
+            );
+            WsMetadata {
+                input_tokens: m.prompt_eval_count,
+                output_tokens: m.eval_count,
+                elapsed_ms,
+                load_duration_ms: Some(m.load_duration_ms()),
+                prompt_eval_ms: Some(m.prompt_eval_ms()),
+                eval_ms: Some(m.eval_ms()),
+                tokens_per_sec: Some(m.tokens_per_sec()),
+            }
+        }
+        None => WsMetadata {
+            input_tokens: result.input_tokens,
+            output_tokens: result.output_tokens,
+            elapsed_ms,
+            ..Default::default()
+        },
+    }
 }

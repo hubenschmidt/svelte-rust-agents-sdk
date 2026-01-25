@@ -1,45 +1,54 @@
-# svelte-rust-agents-sdk
+# agents-rs
 
-A multi-agent chat system with a Svelte 5 frontend and Rust backend featuring real-time streaming, LLM observability, and modular worker architecture.
+A visual agent orchestration platform with a Svelte 5 frontend and Rust backend. Design, configure, and run multi-agent pipelines using proven agentic patterns.
 
-- **Real-time streaming** — Responses stream token-by-token as they're generated
-- **Multi-agent pipeline** — Frontline, Orchestrator, Workers, Evaluator
-- **Local model support** — Auto-discovers Ollama models at startup
-- **Benchmarking mode** — Toggle verbose metrics (tokens/sec, eval time, load time)
-- **LLM observability** — Token usage and response time displayed per message
-- **Modular workers** — Search (Serper), Email (SendGrid), General conversation
+## Features
+
+- **Visual Pipeline Editor** — Drag-and-drop node configuration with real-time preview
+- **Template Patterns** — 5 built-in templates based on proven agentic architectures
+- **Custom Configs** — Save, load, and manage your own pipeline configurations
+- **Real-time Streaming** — Token-by-token response streaming via WebSocket
+- **Multi-model Support** — OpenAI cloud models + auto-discovered Ollama local models
+- **Dev Mode** — Toggle verbose metrics (tokens/sec, eval time, load time)
+
+## Pipeline Patterns
+
+The app includes templates for common agentic patterns:
+
+| Pattern | Use Case | Example |
+|---------|----------|---------|
+| **Prompt Chaining** | Sequential refinement with quality gates | Blog Post Writer |
+| **Routing** | Classify and dispatch to specialized handlers | Customer Support Bot |
+| **Parallelization** | Run independent tasks concurrently | Document Reviewer |
+| **Orchestrator-Worker** | Dynamic task decomposition | Research Assistant |
+| **Evaluator-Optimizer** | Self-critique loop for quality assurance | Code Generator |
 
 ## Architecture
 
 ```
 ┌─────────────────┐                    ┌─────────────────────────────────────┐
-│                 │◄──── WebSocket ────│              Agent                  │
-│  Svelte 5 UI    │                    │                                     │
-│                 │                    │  Model Discovery                    │
-│  Settings       │                    │  ├── OpenAI (cloud)                 │
-│  └─ Dev Mode    │                    │  └── Ollama /api/tags (local)       │
-└─────────────────┘                    │                                     │
-                                       │  ┌─────────┐    ┌─────────────┐     │
-                                       │  │Frontline│───►│ Orchestrator│     │
-                                       │  └─────────┘    └──────┬──────┘     │
-                                       │                        │            │
-                                       │         ┌──────────────┼──────────┐ │
-                                       │         ▼              ▼          ▼ │
-                                       │    ┌────────┐    ┌────────┐  ┌─────┐│
-                                       │    │ Search │    │ Email  │  │ Gen ││
-                                       │    │(Serper)│    │(SGGrid)│  │     ││
-                                       │    └────────┘    └────────┘  └─────┘│
-                                       │                        │            │
-                                       │                   ┌────▼────┐       │
-                                       │                   │Evaluator│       │
-                                       │                   └─────────┘       │
+│  Svelte 5 UI    │◄──── WebSocket ────│              Agent                  │
+│                 │                    │                                     │
+│  Header         │                    │  Model Discovery                    │
+│  ├─ Config      │                    │  ├── OpenAI (cloud)                 │
+│  └─ Model       │                    │  └── Ollama /api/tags (local)       │
+│                 │                    │                                     │
+│  Pipeline       │                    │  Pipeline Execution                 │
+│  Editor         │                    │  ├── Templates (read-only)          │
+│                 │                    │  └── User Configs (SQLite)          │
+│  Chat           │                    │                                     │
+│  └─ Streaming   │                    │  Node Types                         │
+└─────────────────┘                    │  ├── llm, router, gate              │
+                                       │  ├── coordinator, aggregator        │
+                                       │  ├── orchestrator, worker           │
+                                       │  └── evaluator, synthesizer         │
                                        └─────────────────────────────────────┘
 ```
 
-## Technologies Used
+## Technologies
 
-- **Client:** Svelte 5, SvelteKit, JavaScript
-- **Agent:** Rust 1.92, Axum, Tokio
+- **Client:** Svelte 5, SvelteKit, TypeScript
+- **Agent:** Rust, Axum, Tokio, SQLite (rusqlite)
 - **LLM:** OpenAI API, Ollama (local models)
 
 ## Prerequisites
@@ -52,13 +61,7 @@ A multi-agent chat system with a Svelte 5 frontend and Rust backend featuring re
 Create a `.env` file in `agent/`:
 
 ```env
-# Required
 OPENAI_API_KEY=sk-...
-
-# Optional
-SERPER_API_KEY=...            # For web search (serper.dev)
-SENDGRID_API_KEY=...          # For email sending
-SENDGRID_FROM_EMAIL=noreply@example.com
 RUST_LOG=info
 ```
 
@@ -71,54 +74,39 @@ docker compose up
 - Client: http://localhost:3001
 - Agent: http://localhost:8000
 
+## Usage
+
+1. **Select a config** from the dropdown (5 examples included)
+2. **Click the edit button** (✎) to open the pipeline editor
+3. **Modify nodes** — change prompts, models, or node types
+4. **Save** your changes as a new config or update existing
+5. **Send a message** to run the pipeline
+
 ## Local Models (Ollama)
 
-The agent auto-discovers installed Ollama models at startup via `/api/tags`.
+The agent auto-discovers installed Ollama models at startup.
 
-### Setup
+```bash
+ollama pull llama3.1
+ollama serve
+```
 
-1. Install [Ollama](https://ollama.ai)
-2. Pull models: `ollama pull llama3.1`
-3. Start Ollama: `ollama serve`
-4. Start the agent — models appear in the dropdown
-
-### Supported Features
-
-- All installed models automatically listed
-- Quantization variants shown (e.g., `Q4_1`, `Q8_0`)
-- Model warm-up on selection (pre-loads for faster first response)
-
-## Developer Mode (Benchmarking)
-
-Toggle via the settings icon to see detailed performance metrics for local models.
-
-### Metrics Displayed
-
-| Metric | Description |
-|--------|-------------|
-| **tokens/sec** | Generation speed |
-| **eval_ms** | Time spent generating tokens |
-| **prompt_eval_ms** | Time spent processing input |
-| **load_duration_ms** | Model load time |
-
-### How It Works
-
-When enabled, uses Ollama's native `/api/chat` endpoint instead of OpenAI-compatible `/v1/chat/completions` to access rich metrics not available via the standard API.
+Models appear in the dropdown automatically.
 
 ## Project Structure
 
 ```
 .
 ├── agent/                    # Rust backend
-│   └── crates/
-│       ├── agents-core/      # Shared types
-│       ├── agents-llm/       # LLM client + Ollama integration
-│       ├── agents-pipeline/  # Frontline, Orchestrator, Evaluator
-│       ├── agents-workers/   # Search, Email, General workers
-│       └── agents-server/    # Axum server, WebSocket handler
+│   ├── crates/
+│   │   ├── agent-core/       # Shared types, ModelConfig
+│   │   ├── agent-config/     # Pipeline presets, node types
+│   │   ├── agent-network/    # Ollama discovery
+│   │   └── agent-server/     # Axum server, WebSocket, SQLite
+│   └── data/                 # SQLite database (auto-created)
 ├── client/                   # SvelteKit frontend
 │   └── src/
-│       ├── lib/components/   # Settings, ChatMessage, ChatInput
+│       ├── lib/components/   # Header, PipelineEditor, Chat
 │       ├── lib/stores/       # chat.ts, settings.ts
 │       └── routes/           # +page.svelte
 └── docker-compose.yml
