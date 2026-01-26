@@ -10,7 +10,7 @@ services:
     volumes:
       - ./agent:/app
       - agent-target:/app/target
-    command: cargo watch --poll -x "run --bin agent-server"
+    command: cargo watch --poll -i data/ -x "run --bin agent-server"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s

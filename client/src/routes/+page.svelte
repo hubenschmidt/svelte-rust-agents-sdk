@@ -161,7 +161,6 @@
 			models={$models}
 			templates={$templates}
 			onUpdate={handlePipelineUpdate}
-			onClose={closeEditor}
 			onSave={handleSavePipeline}
 		/>
 	{:else}

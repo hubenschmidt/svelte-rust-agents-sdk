@@ -47,7 +47,8 @@ function createChatStore() {
 		};
 
 		ws.onclose = (ev) => {
-			console.log('[ws] Connection closed:', ev.code, ev.reason, ev.wasClean);
+			console.log('[ws] Connection closed:', ev.code, ev.reason, 'wasClean:', ev.wasClean);
+			console.log('[ws] Close event details - code meanings: 1000=normal, 1001=going away, 1006=abnormal (server died)');
 			isConnected.set(false);
 			isStreaming.set(false);
 			isThinking.set(false);
@@ -73,6 +74,11 @@ function createChatStore() {
 			}
 
 			if (data.configs) {
+				console.log('[ws] Received configs from backend:');
+				data.configs.forEach(c => {
+					console.log(`  - ${c.id}: nodes with positions:`, c.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })));
+					console.log(`    layout:`, c.layout);
+				});
 				pipelines.set(data.configs);
 				if (data.configs.length > 0 && !get(selectedPipeline)) {
 					selectedPipeline.set(data.configs[0].id);
@@ -228,6 +234,8 @@ function createChatStore() {
 			layout: config.layout
 		};
 		console.log('[save] Sending save request:', config.id, config.name);
+		console.log('[save] nodes with positions:', config.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })));
+		console.log('[save] layout:', config.layout);
 		try {
 			const res = await fetch('http://localhost:8000/pipelines/save', {
 				method: 'POST',
@@ -248,8 +256,11 @@ function createChatStore() {
 			if (idx >= 0) return [...list.slice(0, idx), config, ...list.slice(idx + 1)];
 			return [...list, config];
 		});
-		console.log('[save] Updated pipelines store, setting selectedPipeline:', config.id);
-		selectedPipeline.set(config.id);
+		// Directly update pipelineConfig with the saved config (including positions)
+		// Don't rely on selectedPipeline subscription since ID might not change
+		console.log('[save] Setting pipelineConfig with positions:', config.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })));
+		pipelineConfig.set(structuredClone(config));
+		console.log('[save] Updated pipelines store and pipelineConfig:', config.id);
 		pipelineModified.set(false);
 	}
 

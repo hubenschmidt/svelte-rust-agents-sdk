@@ -2,11 +2,21 @@
 	import { onMount } from 'svelte';
 	import type { PipelineInfo, NodeInfo, EdgeInfo, ModelConfig } from '$lib/types';
 
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let dagre: any = null;
+	let dagreReady = false;
+
+	onMount(async () => {
+		// @ts-ignore - CDN import for ESM-compatible dagre
+		const mod = await import('https://esm.sh/@dagrejs/dagre@1.1.4');
+		dagre = mod.default;
+		dagreReady = true;
+	});
+
 	export let config: PipelineInfo;
 	export let models: ModelConfig[];
 	export let templates: PipelineInfo[] = [];
 	export let onUpdate: (config: PipelineInfo) => void;
-	export let onClose: () => void;
 	export let onSave: (config: PipelineInfo) => void = () => {};
 
 	const nodeTypes = ['llm', 'worker', 'coordinator', 'aggregator', 'orchestrator', 'synthesizer', 'router', 'gate', 'evaluator'];
@@ -34,9 +44,6 @@
 	let newEdgeFrom = '';
 	let newEdgeTo = '';
 	let newEdgeType = 'direct';
-	let dagreReady = false;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	let dagreLib: any = null;
 
 	// Drag state
 	let draggingNodeId: string | null = null;
@@ -46,8 +53,12 @@
 	// Sidebar state
 	let sidebarOpen = true;
 
-	// Load positions from config on init
-	$: {
+	// Load positions from config on mount
+	function loadPositionsFromConfig() {
+		console.log('[loadPositions] loading from config:', config.id);
+		console.log('[loadPositions] config.nodes:', config.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })));
+		console.log('[loadPositions] config.layout:', config.layout);
+
 		const positions: Record<string, { x: number; y: number }> = {};
 		// Load from nodes
 		config.nodes.forEach(n => {
@@ -61,10 +72,18 @@
 				positions[id] = pos;
 			});
 		}
-		if (Object.keys(positions).length > 0) {
-			nodePositionOverrides = positions;
-		}
+		console.log('[loadPositions] loaded positions:', positions);
+		nodePositionOverrides = positions;
 	}
+
+	// Load positions on mount
+	onMount(() => {
+		loadPositionsFromConfig();
+		// If dagre is already ready (hot reload), rebuild layout
+		if (dagreReady) {
+			rebuildLayout();
+		}
+	});
 
 	$: selectedNode = selectedNodeId ? config.nodes.find(n => n.id === selectedNodeId) : null;
 	$: selectedEdge = selectedEdgeIndex !== null ? config.edges[selectedEdgeIndex] : null;
@@ -75,19 +94,7 @@
 
 	let layout: Layout = { nodes: [], edges: [], width: 500, height: 400 };
 
-	onMount(async () => {
-		try {
-			const mod = await import('@dagrejs/dagre');
-			dagreLib = mod.default || mod;
-			dagreReady = true;
-		} catch (e) {
-			console.error('Failed to load dagre:', e);
-			dagreReady = true; // Use fallback
-		}
-	});
-
-	// Reactively rebuild layout and apply position overrides
-	$: if (dagreReady) {
+	function rebuildLayout() {
 		const base = computeLayout(config.nodes, config.edges);
 		// Apply manual position overrides
 		base.nodes = base.nodes.map(n => {
@@ -99,6 +106,15 @@
 			base.edges = recomputeEdges(base.nodes, config.edges);
 		}
 		layout = base;
+	}
+
+	// Rebuild layout when dagre ready, positions change, or nodes/edges change
+	$: if (dagreReady) {
+		// Track these dependencies to trigger rebuild
+		config.nodes;
+		config.edges;
+		nodePositionOverrides;
+		rebuildLayout();
 	}
 
 	function recomputeEdges(nodes: LayoutNode[], edges: EdgeInfo[]): LayoutEdge[] {
@@ -139,24 +155,27 @@
 		const hasInput = edgeList.some(e => (Array.isArray(e.from) ? e.from : [e.from]).includes('input'));
 		const hasOutput = edgeList.some(e => (Array.isArray(e.to) ? e.to : [e.to]).includes('output'));
 
-		if (dagreLib) {
-			try {
-				const g = new dagreLib.graphlib.Graph();
-				g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80, marginx: 50, marginy: 50 });
-				g.setDefaultEdgeLabel(() => ({}));
+		if (!dagre) {
+			return computeFallbackLayout(nodeList, edgeList, hasInput, hasOutput);
+		}
 
-				if (hasInput) g.setNode('input', { width: NODE_WIDTH, height: NODE_HEIGHT });
-				if (hasOutput) g.setNode('output', { width: NODE_WIDTH, height: NODE_HEIGHT });
+		try {
+			const g = new dagre.graphlib.Graph();
+			g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80, marginx: 50, marginy: 50 });
+			g.setDefaultEdgeLabel(() => ({}));
 
-				nodeList.forEach(n => g.setNode(n.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
+			if (hasInput) g.setNode('input', { width: NODE_WIDTH, height: NODE_HEIGHT });
+			if (hasOutput) g.setNode('output', { width: NODE_WIDTH, height: NODE_HEIGHT });
 
-				edgeList.forEach(e => {
-					const froms = Array.isArray(e.from) ? e.from : [e.from];
-					const tos = Array.isArray(e.to) ? e.to : [e.to];
-					froms.forEach(f => tos.forEach(t => g.setEdge(f, t)));
-				});
+			nodeList.forEach(n => g.setNode(n.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
 
-				dagreLib.layout(g);
+			edgeList.forEach(e => {
+				const froms = Array.isArray(e.from) ? e.from : [e.from];
+				const tos = Array.isArray(e.to) ? e.to : [e.to];
+				froms.forEach(f => tos.forEach(t => g.setEdge(f, t)));
+			});
+
+			dagre.layout(g);
 
 				const layoutNodes: LayoutNode[] = [];
 
@@ -198,11 +217,12 @@
 					height: Math.max((info?.height || 0) + 100, 400)
 				};
 			} catch (err) {
-				console.error('Dagre error:', err);
-			}
+			console.error('Dagre error:', err);
+			return computeFallbackLayout(nodeList, edgeList, hasInput, hasOutput);
 		}
+	}
 
-		// Fallback: grid layout with simple straight edges
+	function computeFallbackLayout(nodeList: NodeInfo[], edgeList: EdgeInfo[], hasInput: boolean, hasOutput: boolean): Layout {
 		const nodePositions: Record<string, {x: number; y: number}> = {};
 		const allNodes: LayoutNode[] = [];
 		const cols = Math.max(Math.ceil(Math.sqrt(nodeList.length + 2)), 2);
@@ -228,7 +248,6 @@
 			nodePositions['output'] = pos;
 		}
 
-		// Compute simple straight-line edges
 		const fallbackEdges: LayoutEdge[] = [];
 		edgeList.forEach((e, idx) => {
 			const froms = Array.isArray(e.from) ? e.from : [e.from];
@@ -237,18 +256,17 @@
 				tos.forEach(t => {
 					const fromPos = nodePositions[f];
 					const toPos = nodePositions[t];
-					if (fromPos && toPos) {
-						fallbackEdges.push({
-							from: f,
-							to: t,
-							points: [
-								{ x: fromPos.x, y: fromPos.y + NODE_HEIGHT / 2 },
-								{ x: toPos.x, y: toPos.y - NODE_HEIGHT / 2 }
-							],
-							edgeType: e.edge_type || 'direct',
-							index: idx
-						});
-					}
+					if (!fromPos || !toPos) return;
+					fallbackEdges.push({
+						from: f,
+						to: t,
+						points: [
+							{ x: fromPos.x, y: fromPos.y + NODE_HEIGHT / 2 },
+							{ x: toPos.x, y: toPos.y - NODE_HEIGHT / 2 }
+						],
+						edgeType: e.edge_type || 'direct',
+						index: idx
+					});
 				});
 			});
 		});
@@ -277,11 +295,13 @@
 	function selectNode(id: string) {
 		selectedNodeId = id;
 		selectedEdgeIndex = null;
+		sidebarOpen = true;
 	}
 
 	function selectEdge(idx: number) {
 		selectedEdgeIndex = idx;
 		selectedNodeId = null;
+		sidebarOpen = true;
 	}
 
 	function updateNodeField(nodeId: string, field: string, value: string | null) {
@@ -325,6 +345,8 @@
 	}
 
 	function saveWithPositions() {
+		console.log('[saveWithPositions] nodePositionOverrides:', nodePositionOverrides);
+
 		// Merge positions into nodes
 		const nodesWithPositions = config.nodes.map(n => {
 			const pos = nodePositionOverrides[n.id];
@@ -345,6 +367,9 @@
 			nodes: nodesWithPositions,
 			layout: Object.keys(layoutPositions).length > 0 ? layoutPositions : undefined
 		};
+
+		console.log('[saveWithPositions] saving config with positions:', configWithPositions.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })));
+		console.log('[saveWithPositions] layout:', configWithPositions.layout);
 
 		onSave(configWithPositions);
 	}
@@ -536,10 +561,9 @@
 	.pipeline-name-input { font-size: 1.125rem; font-weight: 600; background: transparent; border: 1px solid transparent; border-radius: 4px; color: var(--text, #fff); padding: 0.25rem 0.5rem; }
 	.pipeline-name-input:hover, .pipeline-name-input:focus { border-color: var(--border, #333); outline: none; }
 	.header-actions { display: flex; gap: 0.5rem; }
-	.template-select, .add-btn, .close-btn, .save-btn { padding: 0.4rem 0.75rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); color: var(--text, #fff); cursor: pointer; font-size: 0.875rem; }
+	.template-select, .add-btn, .save-btn { padding: 0.4rem 0.75rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); color: var(--text, #fff); cursor: pointer; font-size: 0.875rem; }
 	.add-btn:hover { background: #3b82f6; }
 	.save-btn:hover { background: #22c55e; }
-	.close-btn:hover { background: var(--border, #333); }
 
 	.editor-body { flex: 1; display: flex; overflow: hidden; position: relative; }
 	.graph-panel { flex: 1; overflow: auto; background: linear-gradient(90deg, var(--border, #333) 1px, transparent 1px) 0 0 / 20px 20px, linear-gradient(var(--border, #333) 1px, transparent 1px) 0 0 / 20px 20px; padding: 1rem; }
@@ -553,7 +577,7 @@
 	.edge { cursor: pointer; }
 	.edge:hover { stroke-width: 3; }
 
-	.side-panel { width: 340px; border-left: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); display: flex; flex-direction: column; overflow-y: auto; }
+	.side-panel { width: 420px; border-left: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); display: flex; flex-direction: column; overflow-y: auto; }
 	.panel-header { padding: 1rem; border-bottom: 1px solid var(--border, #333); }
 	.done-btn { width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border, #333); background: #3b82f6; color: #fff; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
 	.done-btn:hover { background: #2563eb; }

@@ -223,6 +223,7 @@ pub async fn ws_handler(
 
 /// Main WebSocket connection handler.
 async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
+    info!("New WebSocket connection established");
     let (mut sender, mut receiver) = socket.split();
 
     // Wait for init message
@@ -318,7 +319,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
         }
     }
 
-    info!("Connection closed: {}", uuid);
+    info!("WebSocket connection closed for client: {}", uuid);
 }
 
 /// Handles a model wake request.
