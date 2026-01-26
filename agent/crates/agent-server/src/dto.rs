@@ -46,6 +46,8 @@ pub struct RuntimeNodeConfig {
     pub model: Option<String>,
     #[serde(default)]
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
 }
 
 /// Runtime edge configuration from the frontend.
@@ -94,6 +96,8 @@ pub struct NodeInfo {
     pub node_type: String,
     pub model: Option<String>,
     pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -7,9 +7,12 @@ A visual agent orchestration platform with a Svelte 5 frontend and Rust backend.
 - **Visual Pipeline Editor** — Drag-and-drop node configuration with real-time preview
 - **Template Patterns** — 5 built-in templates based on proven agentic architectures
 - **Custom Configs** — Save, load, and manage your own pipeline configurations
+- **Tool Support** — Assign tools (web search, URL fetch) to nodes for agentic capabilities
 - **Real-time Streaming** — Token-by-token response streaming via WebSocket
 - **Multi-model Support** — OpenAI cloud models + auto-discovered Ollama local models
 - **Dev Mode** — Toggle verbose metrics (tokens/sec, eval time, load time)
+
+![Research Assistant Pipeline](spec/screenshots/research_assistant.png)
 
 ## Pipeline Patterns
 
@@ -62,6 +65,8 @@ Create a `.env` file in `agent/`:
 
 ```env
 OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-...    # Optional: for Anthropic models
+TAVILY_API_KEY=tvly-...     # Optional: enables web_search tool
 RUST_LOG=info
 ```
 
@@ -72,7 +77,8 @@ docker compose up
 ```
 
 - Client: http://localhost:3001
-- Agent: http://localhost:8000
+- Composer: http://localhost:3001/composer
+- Agent API: http://localhost:8000
 
 ## Usage
 
@@ -81,6 +87,37 @@ docker compose up
 3. **Modify nodes** — change prompts, models, or node types
 4. **Save** your changes as a new config or update existing
 5. **Send a message** to run the pipeline
+
+## Compose Mode
+
+The `/composer` route provides a visual pipeline editor for designing agent workflows.
+
+### Workflow
+
+1. **Load a template** — Select from the "Apply template..." dropdown to start with a proven pattern
+2. **Edit nodes** — Click any node to configure:
+   - **ID** — Unique identifier
+   - **Type** — Node behavior (llm, router, orchestrator, worker, etc.)
+   - **Model** — Override the default model for this node
+   - **Prompt** — System instructions for LLM nodes
+   - **Tools** — Enable `web_search` or `fetch_url` for agentic capabilities
+3. **Add edges** — Use the "Add Edge" controls to connect nodes with edge types:
+   - `direct` — Standard sequential flow
+   - `conditional` — Router-based branching
+   - `parallel` — Concurrent execution
+   - `dynamic` — Orchestrator-dispatched workers
+4. **Save** — Persist your configuration to the database
+
+### Tools
+
+Nodes can be assigned tools that enable autonomous information gathering:
+
+| Tool | Description | Requires |
+|------|-------------|----------|
+| `fetch_url` | Fetches and parses web page content | — |
+| `web_search` | Searches the web via Tavily API | `TAVILY_API_KEY` |
+
+Tools are executed in an agentic loop: the LLM requests a tool → backend executes → results fed back → LLM continues until it produces a final response.
 
 ## Local Models (Ollama)
 
@@ -102,6 +139,7 @@ Models appear in the dropdown automatically.
 │   │   ├── agent-core/       # Shared types, ModelConfig
 │   │   ├── agent-config/     # Pipeline presets, node types
 │   │   ├── agent-network/    # Ollama discovery
+│   │   ├── agent-tools/      # Tool registry (fetch_url, web_search)
 │   │   └── agent-server/     # Axum server, WebSocket, SQLite
 │   └── data/                 # SQLite database (auto-created)
 ├── client/                   # SvelteKit frontend

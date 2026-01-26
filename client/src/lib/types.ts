@@ -1,3 +1,9 @@
+export type ToolSchema = {
+	name: string;
+	description: string;
+	parameters: Record<string, unknown>;
+};
+
 export type WsMetadata = {
 	input_tokens: number;
 	output_tokens: number;
@@ -20,6 +26,7 @@ export type NodeInfo = {
 	node_type: string;
 	model: string | null;
 	prompt: string | null;
+	tools?: string[];
 	x?: number;
 	y?: number;
 };
@@ -44,6 +51,7 @@ export type RuntimeNodeConfig = {
 	type: string;
 	model?: string | null;
 	prompt?: string | null;
+	tools?: string[];
 };
 
 export type RuntimeEdgeConfig = {

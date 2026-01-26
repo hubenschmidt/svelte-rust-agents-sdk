@@ -115,6 +115,9 @@ pub struct NodeConfig {
     pub config: serde_json::Value,
     #[serde(default)]
     pub prompt: Option<String>,
+    /// Tool names this node has access to (from tool registry)
+    #[serde(default)]
+    pub tools: Vec<String>,
 }
 
 /// Configuration for an edge connecting nodes.

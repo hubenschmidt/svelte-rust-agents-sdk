@@ -9,6 +9,7 @@ license.workspace = true
 agent-config = { workspace = true }
 agent-core = { workspace = true }
 agent-network = { workspace = true }
+agent-tools = { workspace = true }
 async-trait = { workspace = true }
 async-recursion = "1.1"
 futures = "0.3"

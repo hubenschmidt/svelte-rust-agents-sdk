@@ -6,6 +6,7 @@ members = [
     "crates/agent-engine",
     "crates/agent-network",
     "crates/agent-server",
+    "crates/agent-tools",
 ]
 
 [workspace.package]
@@ -58,3 +59,4 @@ agent-config = { path = "crates/agent-config" }
 agent-core = { path = "crates/agent-core" }
 agent-engine = { path = "crates/agent-engine" }
 agent-network = { path = "crates/agent-network" }
+agent-tools = { path = "crates/agent-tools" }

@@ -12,6 +12,7 @@ agent-config.workspace = true
 agent-core.workspace = true
 agent-engine.workspace = true
 agent-network.workspace = true
+agent-tools.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tower.workspace = true

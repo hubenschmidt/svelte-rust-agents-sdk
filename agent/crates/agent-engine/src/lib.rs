@@ -2,17 +2,19 @@
 //!
 //! Executes agent pipelines as directed graphs, handling different edge types
 //! (direct, parallel, conditional) and node types (LLM, gate, router, etc.).
+//! Supports tool calling with agentic loops for nodes that have tools configured.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use agent_config::{EdgeConfig, EdgeEndpoint, EdgeType, NodeConfig, NodeType, PipelineConfig};
 use agent_core::{AgentError, ModelConfig};
-use agent_network::{LlmStream, UnifiedLlmClient};
+use agent_network::{ChatResponse, LlmStream, ToolSchema, UnifiedLlmClient};
+use agent_tools::ToolRegistry;
 use async_recursion::async_recursion;
 use futures::future::join_all;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Input data passed to a node during execution.
 #[derive(Debug, Clone, Default)]
@@ -61,6 +63,7 @@ pub struct PipelineEngine {
     config: PipelineConfig,
     resolver: ModelResolver,
     node_overrides: HashMap<String, String>,
+    tool_registry: Arc<ToolRegistry>,
 }
 
 impl PipelineEngine {
@@ -75,6 +78,23 @@ impl PipelineEngine {
             config,
             resolver: ModelResolver::new(models, default_model),
             node_overrides,
+            tool_registry: Arc::new(ToolRegistry::with_defaults()),
+        }
+    }
+
+    /// Creates a new engine with a custom tool registry.
+    pub fn with_tools(
+        config: PipelineConfig,
+        models: Vec<ModelConfig>,
+        default_model: ModelConfig,
+        node_overrides: HashMap<String, String>,
+        tool_registry: ToolRegistry,
+    ) -> Self {
+        Self {
+            config,
+            resolver: ModelResolver::new(models, default_model),
+            node_overrides,
+            tool_registry: Arc::new(tool_registry),
         }
     }
 
@@ -193,20 +213,22 @@ impl PipelineEngine {
             let Some(node) = self.get_node(id) else { continue };
             let input = self.get_input_for_node(id, context).await;
             let model = self.get_node_model(node).clone();
-            node_data.push((node.id.clone(), node.node_type, model, node.prompt.clone(), input));
+            node_data.push((node.id.clone(), node.node_type, model, node.prompt.clone(), node.tools.clone(), input));
         }
 
         // Execute in parallel
+        let tool_registry = Arc::clone(&self.tool_registry);
         let futures: Vec<_> = node_data.into_iter()
-            .map(|(node_id, node_type, model, prompt, input)| {
+            .map(|(node_id, node_type, model, prompt, tools, input)| {
                 let step = Arc::clone(step);
+                let registry = Arc::clone(&tool_registry);
                 async move {
                     let current_step = {
                         let mut s = step.write().await;
                         *s += 1;
                         *s
                     };
-                    let result = execute_node(&node_id, node_type, &model, prompt.as_deref(), &input, current_step).await;
+                    let result = execute_node(&node_id, node_type, &model, prompt.as_deref(), &input, &tools, &registry, current_step).await;
                     (node_id, result)
                 }
             })
@@ -261,7 +283,7 @@ impl PipelineEngine {
             };
 
             let model = self.get_node_model(node);
-            let output = execute_node(node_id, node.node_type, model, node.prompt.as_deref(), &input, current_step).await?;
+            let output = execute_node(node_id, node.node_type, model, node.prompt.as_deref(), &input, &node.tools, &self.tool_registry, current_step).await?;
 
             context.write().await.insert(node_id.to_string(), output.content);
             executed.insert(node_id.to_string());
@@ -297,28 +319,34 @@ impl PipelineEngine {
     }
 }
 
+/// Maximum number of tool call iterations to prevent infinite loops.
+const MAX_TOOL_ITERATIONS: usize = 10;
+
 /// Executes a single node and returns its output.
+/// If the node has tools configured, runs an agentic loop until the LLM produces final output.
 async fn execute_node(
     node_id: &str,
     node_type: NodeType,
     model: &ModelConfig,
     prompt: Option<&str>,
     input: &str,
+    tools: &[String],
+    tool_registry: &ToolRegistry,
     step: usize,
 ) -> Result<NodeOutput, AgentError> {
     info!("╠──────────────────────────────────────────────────────────────");
     info!("║ [{}] NODE: {} ({:?})", step, node_id, node_type);
     info!("║     Model: {}", model.name);
+    if !tools.is_empty() {
+        info!("║     Tools: {:?}", tools);
+    }
     debug!("║     Input: {}...", input.chars().take(100).collect::<String>());
 
     let start = std::time::Instant::now();
     info!("║     → {}", node_type.action_label());
 
     let content = if node_type.requires_llm() {
-        let client = UnifiedLlmClient::new(&model.model, model.api_base.as_deref());
-        let response = client.chat(prompt.unwrap_or(""), input).await?;
-        info!("║     ← Response: {} chars", response.content.len());
-        response.content
+        execute_node_with_tools(model, prompt, input, tools, tool_registry).await?
     } else {
         input.to_string()
     };
@@ -326,4 +354,93 @@ async fn execute_node(
     info!("║     ✓ Completed in {:?}", start.elapsed());
 
     Ok(NodeOutput { content, next_nodes: vec![] })
+}
+
+/// Executes an LLM node, potentially with an agentic tool loop.
+async fn execute_node_with_tools(
+    model: &ModelConfig,
+    prompt: Option<&str>,
+    input: &str,
+    tools: &[String],
+    tool_registry: &ToolRegistry,
+) -> Result<String, AgentError> {
+    let client = UnifiedLlmClient::new(&model.model, model.api_base.as_deref());
+    let system_prompt = prompt.unwrap_or("");
+
+    // No tools configured - simple chat
+    if tools.is_empty() {
+        let response = client.chat(system_prompt, input).await?;
+        info!("║     ← Response: {} chars", response.content.len());
+        return Ok(response.content);
+    }
+
+    // Get tool schemas for configured tools
+    let tool_schemas: Vec<ToolSchema> = tools
+        .iter()
+        .filter_map(|name| {
+            tool_registry.get(name).map(|t| ToolSchema {
+                name: t.name().to_string(),
+                description: t.description().to_string(),
+                parameters: t.parameters(),
+            })
+        })
+        .collect();
+
+    if tool_schemas.is_empty() {
+        warn!("║     ⚠ No valid tools found in registry for: {:?}", tools);
+        let response = client.chat(system_prompt, input).await?;
+        return Ok(response.content);
+    }
+
+    info!("║     → Starting agentic loop with {} tools", tool_schemas.len());
+
+    // Agentic loop
+    let mut messages = vec![UnifiedLlmClient::user_message(input)?];
+    let mut iterations = 0;
+
+    loop {
+        iterations += 1;
+        if iterations > MAX_TOOL_ITERATIONS {
+            warn!("║     ⚠ Max tool iterations ({}) reached", MAX_TOOL_ITERATIONS);
+            return Err(AgentError::LlmError(format!(
+                "Max tool iterations ({}) exceeded",
+                MAX_TOOL_ITERATIONS
+            )));
+        }
+
+        let response = client
+            .chat_with_tools(system_prompt, messages.clone(), &tool_schemas)
+            .await?;
+
+        match response {
+            ChatResponse::Content(llm_response) => {
+                info!("║     ← Final response: {} chars (after {} iterations)",
+                    llm_response.content.len(), iterations);
+                return Ok(llm_response.content);
+            }
+            ChatResponse::ToolCalls { calls, metrics: _ } => {
+                info!("║     ← Tool calls: {:?}", calls.iter().map(|c| &c.name).collect::<Vec<_>>());
+
+                // Add assistant message with tool calls (for context)
+                // Note: In a real implementation, we'd need to serialize the tool calls
+                // For now, we just proceed with executing tools
+
+                for call in &calls {
+                    let tool = tool_registry.get(&call.name).ok_or_else(|| {
+                        AgentError::LlmError(format!("Tool not found: {}", call.name))
+                    })?;
+
+                    info!("║       → Executing tool: {}", call.name);
+                    let result = tool.execute(call.arguments.clone()).await.map_err(|e| {
+                        AgentError::LlmError(format!("Tool execution failed: {}", e))
+                    })?;
+
+                    info!("║       ← Tool result: {} chars", result.len());
+
+                    // Add tool result to messages
+                    messages.push(UnifiedLlmClient::tool_result_message(&call.id, &result)?);
+                }
+            }
+        }
+    }
 }

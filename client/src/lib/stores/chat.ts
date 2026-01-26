@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { ChatMsg, HistoryMessage, ModelConfig, PipelineInfo, RuntimePipelineConfig, WsPayload, WsResponse, WsMetadata } from '$lib/types';
+import type { ChatMsg, HistoryMessage, ModelConfig, PipelineInfo, RuntimePipelineConfig, WsPayload, WsResponse, WsMetadata, ToolSchema } from '$lib/types';
 import { devMode } from './settings';
 
 function createChatStore() {
@@ -16,6 +16,7 @@ function createChatStore() {
 	const selectedPipeline = writable<string>('');
 	const nodeModelOverrides = writable<Record<string, string>>({});
 	const modelStatus = writable<string>('');
+	const availableTools = writable<ToolSchema[]>([]);
 
 	// Mutable pipeline config (cloned from selected config, user can modify)
 	const pipelineConfig = writable<PipelineInfo | null>(null);
@@ -25,7 +26,13 @@ function createChatStore() {
 	const composeMode = writable<'idle' | 'composing' | 'finalizing'>('idle');
 	const composeDraft = writable<Partial<PipelineInfo> | null>(null);
 
-	const COMPOSE_SYSTEM_PROMPT = `You are a pipeline design assistant helping users create agentic workflow patterns.
+	function buildComposePrompt(): string {
+		const tools = get(availableTools);
+		const toolsList = tools.length > 0
+			? tools.map(t => `- ${t.name}: ${t.description}`).join('\n')
+			: '- (No tools currently available)';
+
+		return `You are a pipeline design assistant helping users create agentic workflow patterns.
 
 Available node types:
 - llm: Language model node for text generation
@@ -44,11 +51,18 @@ Available edge types:
 - dynamic: Orchestrator decides which workers (subset of many)
 - feedback: Loop back for iterative refinement (e.g., evaluator → generator)
 
+Available tools that can be assigned to nodes:
+${toolsList}
+
+When a node needs to access external information or perform actions, assign appropriate tools.
+For example, a "researcher" node that needs to find information should have the "web_search" tool.
+
 Guide the user by:
 1. Understanding their use case and requirements
 2. Suggesting appropriate patterns (routing for classification, aggregator for multi-source, evaluator-optimizer for quality)
 3. Building the pipeline incrementally through conversation
-4. Explaining your design choices
+4. Suggesting appropriate tools for nodes that need external capabilities
+5. Explaining your design choices
 
 When the user says "/done" or indicates they're satisfied, output the final configuration as a fenced JSON block:
 \`\`\`json
@@ -56,7 +70,7 @@ When the user says "/done" or indicates they're satisfied, output the final conf
   "name": "Descriptive Pipeline Name",
   "description": "What this pipeline does",
   "nodes": [
-    { "id": "node_id", "node_type": "llm|worker|router|etc", "prompt": "System prompt for this node" }
+    { "id": "node_id", "node_type": "llm|worker|router|etc", "prompt": "System prompt for this node", "tools": ["tool_name"] }
   ],
   "edges": [
     { "from": "input", "to": "first_node" },
@@ -65,7 +79,9 @@ When the user says "/done" or indicates they're satisfied, output the final conf
 }
 \`\`\`
 
+The "tools" field is optional - only include it for nodes that need external capabilities.
 Always include edges from "input" to the first node(s) and from final node(s) to "output".`;
+	}
 
 	let ws: WebSocket | null = null;
 	const uuid = crypto.randomUUID();
@@ -83,6 +99,19 @@ Always include edges from "input" to the first node(s) and from final node(s) to
 		nodeModelOverrides.set({});
 	});
 
+	async function fetchTools() {
+		try {
+			const res = await fetch('http://localhost:8000/tools');
+			if (res.ok) {
+				const tools = await res.json();
+				availableTools.set(tools);
+				console.log('[tools] Fetched', tools.length, 'available tools');
+			}
+		} catch (e) {
+			console.warn('[tools] Failed to fetch tools:', e);
+		}
+	}
+
 	function connect(url: string) {
 		ws = new WebSocket(url);
 
@@ -90,6 +119,7 @@ Always include edges from "input" to the first node(s) and from final node(s) to
 			isConnected.set(true);
 			const payload: WsPayload = { uuid, init: true };
 			ws?.send(JSON.stringify(payload));
+			fetchTools();
 		};
 
 		ws.onclose = (ev) => {
@@ -204,7 +234,8 @@ Always include edges from "input" to the first node(s) and from final node(s) to
 				id: n.id,
 				type: n.node_type,
 				model: n.model,
-				prompt: n.prompt
+				prompt: n.prompt,
+				tools: n.tools
 			})),
 			edges: config.edges.map((e) => ({
 				from: e.from,
@@ -242,7 +273,7 @@ Always include edges from "input" to the first node(s) and from final node(s) to
 
 		// In compose mode, send history and custom system prompt
 		if (mode === 'composing') {
-			payload.system_prompt = COMPOSE_SYSTEM_PROMPT;
+			payload.system_prompt = buildComposePrompt();
 			payload.history = buildHistory();
 		}
 
@@ -431,6 +462,7 @@ What would you like to build?`
 		selectedPipeline,
 		nodeModelOverrides,
 		modelStatus,
+		availableTools,
 		pipelineConfig,
 		pipelineModified,
 		composeMode,

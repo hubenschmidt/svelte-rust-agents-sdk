@@ -1,9 +1,10 @@
 //! Unified LLM client that routes to the appropriate provider based on model name.
 
 use agent_core::{AgentError, Message};
+use async_openai::types::ChatCompletionRequestMessage;
 
 use crate::anthropic::AnthropicClient;
-use crate::client::LlmClient;
+use crate::client::{ChatResponse, LlmClient, ToolSchema};
 use crate::{LlmResponse, LlmStream};
 
 /// Provider type determined from model name.
@@ -71,5 +72,42 @@ impl UnifiedLlmClient {
                 client.chat_stream(system_prompt, history, user_input).await
             }
         }
+    }
+
+    /// Sends a chat request with tools (OpenAI only for now).
+    /// Returns either content or tool calls that need to be executed.
+    pub async fn chat_with_tools(
+        &self,
+        system_prompt: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+        tools: &[ToolSchema],
+    ) -> Result<ChatResponse, AgentError> {
+        match self.provider {
+            ProviderType::OpenAI => {
+                let client = LlmClient::new(&self.model, self.api_base.as_deref());
+                client.chat_with_tools(system_prompt, messages, tools).await
+            }
+            ProviderType::Anthropic => {
+                // TODO: Implement Anthropic tool calling
+                Err(AgentError::LlmError(
+                    "Tool calling not yet supported for Anthropic models".to_string(),
+                ))
+            }
+        }
+    }
+
+    /// Helper to create a user message for tool conversations.
+    pub fn user_message(content: &str) -> Result<ChatCompletionRequestMessage, AgentError> {
+        LlmClient::user_message(content)
+    }
+
+    /// Helper to create an assistant message for tool conversations.
+    pub fn assistant_message(content: &str) -> Result<ChatCompletionRequestMessage, AgentError> {
+        LlmClient::assistant_message(content)
+    }
+
+    /// Helper to create a tool result message.
+    pub fn tool_result_message(tool_call_id: &str, content: &str) -> Result<ChatCompletionRequestMessage, AgentError> {
+        LlmClient::tool_result_message(tool_call_id, content)
     }
 }

@@ -9,6 +9,6 @@ mod ollama;
 mod unified;
 
 pub use anthropic::AnthropicClient;
-pub use client::{LlmClient, LlmMetrics, LlmResponse, LlmStream, StreamChunk};
+pub use client::{ChatResponse, LlmClient, LlmMetrics, LlmResponse, LlmStream, StreamChunk, ToolCall, ToolSchema};
 pub use ollama::{discover_models, unload_model, OllamaClient, OllamaMetrics, OllamaMetricsCollector};
 pub use unified::UnifiedLlmClient;

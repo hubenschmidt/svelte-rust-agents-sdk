@@ -4,7 +4,7 @@
 	import PipelineEditor from '$lib/components/PipelineEditor.svelte';
 	import type { PipelineInfo } from '$lib/types';
 
-	const { pipelineConfig, models, templates } = chat;
+	const { pipelineConfig, models, templates, availableTools } = chat;
 
 	function handlePipelineUpdate(config: PipelineInfo) {
 		chat.pipelineConfig.set(config);
@@ -23,6 +23,7 @@
 		config={$pipelineConfig}
 		models={$models}
 		templates={$templates}
+		availableTools={$availableTools}
 		onUpdate={handlePipelineUpdate}
 		onSave={handleSavePipeline}
 	/>

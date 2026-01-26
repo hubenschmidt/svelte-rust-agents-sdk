@@ -4,7 +4,7 @@
   "description": "Complex tasks are broken down dynamically and combined",
   "nodes": [
     { "id": "orchestrator", "type": "orchestrator", "model": null, "prompt": "Analyze the task and determine which workers to dispatch. Break down complex requests into actionable subtasks." },
-    { "id": "search_worker", "type": "worker", "model": null, "prompt": "You are a search specialist. Find relevant information and provide detailed search results." },
+    { "id": "search_worker", "type": "worker", "model": null, "prompt": "You are a search specialist. Find relevant information and provide detailed search results.", "tools": ["web_search", "fetch_url"] },
     { "id": "general_worker", "type": "worker", "model": null, "prompt": "You are a general-purpose assistant. Complete the assigned task thoroughly and accurately." },
     { "id": "synthesizer", "type": "synthesizer", "model": null, "prompt": "Synthesize the worker outputs into a coherent, unified final response." }
   ],

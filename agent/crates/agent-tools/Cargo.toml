@@ -1,0 +1,14 @@
+[package]
+name = "agent-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+agent-core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+html2text = "0.12"

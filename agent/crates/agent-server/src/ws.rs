@@ -41,6 +41,7 @@ fn runtime_to_pipeline_config(runtime: &RuntimePipelineConfig) -> PipelineConfig
         model: n.model.clone(),
         config: serde_json::Value::Null,
         prompt: n.prompt.clone(),
+        tools: n.tools.clone().unwrap_or_default(),
     }).collect();
 
     let edges = runtime.edges.iter().map(|e| EdgeConfig {

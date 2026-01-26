@@ -1,7 +1,7 @@
 //! OpenAI-compatible chat client with streaming support.
 //!
 //! Works with OpenAI API and any compatible endpoint (including Ollama's /v1 endpoint).
-//! Supports regular chat, streaming, and structured JSON output.
+//! Supports regular chat, streaming, structured JSON output, and tool calling.
 
 use std::pin::Pin;
 use std::time::Instant;
@@ -11,14 +11,15 @@ use async_openai::{
     config::OpenAIConfig,
     types::{
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        ChatCompletionStreamOptions, CreateChatCompletionRequestArgs,
-        CreateChatCompletionResponse, ResponseFormat,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestToolMessageArgs,
+        ChatCompletionRequestUserMessageArgs, ChatCompletionStreamOptions,
+        ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequestArgs,
+        CreateChatCompletionResponse, FunctionObject, ResponseFormat,
     },
     Client,
 };
 use futures::Stream;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::{debug, info};
 
 /// A chunk from a streaming LLM response.
@@ -43,6 +44,36 @@ pub struct LlmMetrics {
 pub struct LlmResponse {
     pub content: String,
     pub metrics: LlmMetrics,
+}
+
+/// A tool call requested by the LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// Result of a tool execution to be sent back to the LLM.
+#[derive(Debug, Clone)]
+pub struct ToolResult {
+    pub tool_call_id: String,
+    pub content: String,
+}
+
+/// Response from an LLM that may include tool calls.
+#[derive(Debug, Clone)]
+pub enum ChatResponse {
+    Content(LlmResponse),
+    ToolCalls { calls: Vec<ToolCall>, metrics: LlmMetrics },
+}
+
+/// Schema for a tool (compatible with OpenAI function calling format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSchema {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
 }
 
 /// Converts any error into an AgentError::LlmError.
@@ -131,6 +162,124 @@ impl LlmClient {
 
         let response = self.client.chat().create(request).await.map_err(llm_err)?;
         extract_response(response, start.elapsed().as_millis() as u64)
+    }
+
+    /// Sends a chat request with tools and returns content or tool calls.
+    pub async fn chat_with_tools(
+        &self,
+        system_prompt: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+        tools: &[ToolSchema],
+    ) -> Result<ChatResponse, AgentError> {
+        let start = Instant::now();
+
+        let openai_tools: Vec<ChatCompletionTool> = tools
+            .iter()
+            .map(|t| ChatCompletionTool {
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionObject {
+                    name: t.name.clone(),
+                    description: Some(t.description.clone()),
+                    parameters: Some(t.parameters.clone()),
+                    strict: None,
+                },
+            })
+            .collect();
+
+        let mut all_messages = vec![
+            ChatCompletionRequestMessage::System(
+                ChatCompletionRequestSystemMessageArgs::default()
+                    .content(system_prompt)
+                    .build()
+                    .map_err(llm_err)?,
+            ),
+        ];
+        all_messages.extend(messages);
+
+        let mut request_builder = CreateChatCompletionRequestArgs::default();
+        request_builder.model(&self.default_model).messages(all_messages);
+
+        if !openai_tools.is_empty() {
+            request_builder.tools(openai_tools);
+        }
+
+        let request = request_builder.build().map_err(llm_err)?;
+        let response = self.client.chat().create(request).await.map_err(llm_err)?;
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        let (input_tokens, output_tokens) = response
+            .usage
+            .as_ref()
+            .map(|u| (u.prompt_tokens, u.completion_tokens))
+            .unwrap_or((0, 0));
+
+        let metrics = LlmMetrics { input_tokens, output_tokens, elapsed_ms };
+
+        let choice = response
+            .choices
+            .into_iter()
+            .next()
+            .ok_or_else(|| AgentError::LlmError("No response choices".into()))?;
+
+        // Check for tool calls
+        if let Some(tool_calls) = choice.message.tool_calls {
+            if !tool_calls.is_empty() {
+                let calls = tool_calls
+                    .into_iter()
+                    .map(|tc| {
+                        let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+                            .unwrap_or(serde_json::Value::Null);
+                        ToolCall {
+                            id: tc.id,
+                            name: tc.function.name,
+                            arguments: args,
+                        }
+                    })
+                    .collect();
+                return Ok(ChatResponse::ToolCalls { calls, metrics });
+            }
+        }
+
+        // Regular content response
+        let content = choice
+            .message
+            .content
+            .ok_or_else(|| AgentError::LlmError("No response content".into()))?;
+
+        info!("LLM: {}ms, tokens: {}/{} (in/out)", elapsed_ms, input_tokens, output_tokens);
+
+        Ok(ChatResponse::Content(LlmResponse { content, metrics }))
+    }
+
+    /// Helper to build a user message.
+    pub fn user_message(content: &str) -> Result<ChatCompletionRequestMessage, AgentError> {
+        Ok(ChatCompletionRequestMessage::User(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(content)
+                .build()
+                .map_err(llm_err)?,
+        ))
+    }
+
+    /// Helper to build an assistant message.
+    pub fn assistant_message(content: &str) -> Result<ChatCompletionRequestMessage, AgentError> {
+        Ok(ChatCompletionRequestMessage::Assistant(
+            ChatCompletionRequestAssistantMessageArgs::default()
+                .content(content)
+                .build()
+                .map_err(llm_err)?,
+        ))
+    }
+
+    /// Helper to build a tool result message.
+    pub fn tool_result_message(tool_call_id: &str, content: &str) -> Result<ChatCompletionRequestMessage, AgentError> {
+        Ok(ChatCompletionRequestMessage::Tool(
+            ChatCompletionRequestToolMessageArgs::default()
+                .tool_call_id(tool_call_id)
+                .content(content)
+                .build()
+                .map_err(llm_err)?,
+        ))
     }
 
     /// Sends a chat request with history and returns a stream of chunks.

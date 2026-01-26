@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 use agent_config::{EdgeEndpoint, PresetRegistry};
 use agent_core::ModelConfig;
 use agent_network::discover_models;
+use agent_tools::ToolRegistry;
 
 use crate::dto::{EdgeInfo, NodeInfo, PipelineInfo};
 use anyhow::Result;
@@ -75,6 +76,7 @@ pub struct ServerState {
     pub templates: Vec<PipelineInfo>,
     pub configs: RwLock<Vec<PipelineInfo>>,
     pub db: Mutex<rusqlite::Connection>,
+    pub tool_registry: ToolRegistry,
 }
 
 impl ServerState {
@@ -141,6 +143,7 @@ async fn main() -> Result<()> {
         .route("/pipelines", get(handlers::pipeline::list))
         .route("/pipelines/save", post(handlers::pipeline::save))
         .route("/pipelines/delete", post(handlers::pipeline::delete))
+        .route("/tools", get(handlers::tools::list))
         .layer(trace_layer);
 
     let app = Router::new()
@@ -204,6 +207,7 @@ async fn init_server_state() -> ServerState {
                 node_type: format!("{:?}", n.node_type).to_lowercase(),
                 model: n.model.clone(),
                 prompt: n.prompt.clone(),
+                tools: if n.tools.is_empty() { None } else { Some(n.tools.clone()) },
                 x: None,
                 y: None,
             }).collect(),
@@ -230,11 +234,15 @@ async fn init_server_state() -> ServerState {
     let configs = db::list_user_pipelines(&conn);
     info!("Loaded {} saved configs", configs.len());
 
+    let tool_registry = ToolRegistry::with_defaults();
+    info!("Registered {} tools", tool_registry.list().len());
+
     ServerState {
         models,
         presets,
         templates,
         configs: RwLock::new(configs),
         db: Mutex::new(conn),
+        tool_registry,
     }
 }

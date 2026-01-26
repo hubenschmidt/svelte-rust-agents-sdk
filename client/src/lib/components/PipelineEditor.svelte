@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { PipelineInfo, NodeInfo, EdgeInfo, ModelConfig } from '$lib/types';
+	import type { PipelineInfo, NodeInfo, EdgeInfo, ModelConfig, ToolSchema } from '$lib/types';
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let dagre: any = null;
@@ -16,6 +16,7 @@
 	export let config: PipelineInfo;
 	export let models: ModelConfig[];
 	export let templates: PipelineInfo[] = [];
+	export let availableTools: ToolSchema[] = [];
 	export let onUpdate: (config: PipelineInfo) => void;
 	export let onSave: (config: PipelineInfo) => void = () => {};
 
@@ -53,6 +54,7 @@
 
 	// Sidebar state
 	let sidebarOpen = true;
+	let sidebarTab: 'properties' | 'tools' = 'properties';
 
 	// Load positions from config on mount
 	function loadPositionsFromConfig() {
@@ -317,6 +319,17 @@
 		onUpdate({ ...config, nodes });
 	}
 
+	function toggleNodeTool(nodeId: string, toolName: string) {
+		const nodes = config.nodes.map(n => {
+			if (n.id !== nodeId) return n;
+			const currentTools = n.tools || [];
+			const hasIt = currentTools.includes(toolName);
+			const newTools = hasIt ? currentTools.filter(t => t !== toolName) : [...currentTools, toolName];
+			return { ...n, tools: newTools.length > 0 ? newTools : undefined };
+		});
+		onUpdate({ ...config, nodes });
+	}
+
 	function updateEdgeType(idx: number, type: string) {
 		const edges = config.edges.map((e, i) => i === idx ? { ...e, edge_type: type } : e);
 		onUpdate({ ...config, edges });
@@ -497,6 +510,10 @@
 					>
 						<rect width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" fill={nodeColors[node.type] || '#6b7280'} stroke={selectedNodeId === node.id ? '#fff' : 'none'} stroke-width="2" />
 						<text x={NODE_WIDTH/2} y={NODE_HEIGHT/2 + 5} text-anchor="middle" fill="#fff" font-size="13" font-weight="500">{node.id}</text>
+						{#if config.nodes.find(n => n.id === node.id)?.tools?.length}
+						<title>Tools: {config.nodes.find(n => n.id === node.id)?.tools?.join(', ')}</title>
+						<text x={NODE_WIDTH/2} y={NODE_HEIGHT + 14} text-anchor="middle" fill="#fbbf24" font-size="12">🔧</text>
+						{/if}
 					</g>
 				{/each}
 			</svg>
@@ -505,8 +522,27 @@
 		{#if sidebarOpen}
 		<div class="side-panel">
 			<div class="panel-header">
+				<div class="sidebar-tabs">
+					<button class:active={sidebarTab === 'properties'} on:click={() => sidebarTab = 'properties'}>Properties</button>
+					<button class:active={sidebarTab === 'tools'} on:click={() => sidebarTab = 'tools'}>Tools</button>
+				</div>
 				<button class="done-btn" on:click={() => sidebarOpen = false}>Done</button>
 			</div>
+
+			{#if sidebarTab === 'tools'}
+			<div class="tools-panel">
+				<h4>Available Tools</h4>
+				{#each availableTools as tool}
+					<div class="tool-item">
+						<strong>{tool.name}</strong>
+						<p class="tool-desc">{tool.description}</p>
+						<span class="tool-usage">Used by: {config.nodes.filter(n => n.tools?.includes(tool.name)).map(n => n.id).join(', ') || 'none'}</span>
+					</div>
+				{:else}
+					<p class="no-tools-msg">No tools available. Set TAVILY_API_KEY to enable web search.</p>
+				{/each}
+			</div>
+			{:else}
 			<div class="edge-controls">
 				<h4>Add Edge</h4>
 				<div class="edge-form">
@@ -544,6 +580,20 @@
 						</select>
 					</label>
 					<label><span>Prompt</span><textarea value={selectedNode.prompt || ''} on:input={(e) => updateNodeField(selectedNode.id, 'prompt', e.currentTarget.value || null)} rows="6"></textarea></label>
+					<label><span>Tools</span>
+						{#if availableTools.length > 0}
+						<div class="tools-selector">
+							{#each availableTools as tool}
+								<label class="tool-checkbox" title={tool.description}>
+									<input type="checkbox" checked={(selectedNode.tools || []).includes(tool.name)} on:change={() => toggleNodeTool(selectedNode.id, tool.name)} />
+									<span class="tool-name">{tool.name}</span>
+								</label>
+							{/each}
+						</div>
+						{:else}
+						<div class="no-tools-msg">No tools available. Set TAVILY_API_KEY to enable web search.</div>
+						{/if}
+					</label>
 					<button class="delete-btn" on:click={() => removeNode(selectedNode.id)}>Delete Node</button>
 				</div>
 			{:else if selectedEdge}
@@ -559,6 +609,7 @@
 					<button class="delete-btn" on:click={() => selectedEdgeIndex !== null && removeEdge(selectedEdgeIndex)}>Delete Edge</button>
 				</div>
 			{/if}
+			{/if}
 		</div>
 		{:else}
 		<button class="open-panel-btn" on:click={() => sidebarOpen = true}>☰</button>
@@ -569,7 +620,7 @@
 <style>
 	.editor-container { position: fixed; inset: 0; background: var(--bg, #1a1a1a); z-index: 1000; display: flex; flex-direction: column; }
 	.editor-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border, #333); }
-	.pipeline-name-input { font-size: 1.125rem; font-weight: 600; background: transparent; border: 1px solid transparent; border-radius: 4px; color: var(--text, #fff); padding: 0.25rem 0.5rem; }
+	.pipeline-name-input { flex: 1; min-width: 0; font-size: 1.125rem; font-weight: 600; background: transparent; border: 1px solid transparent; border-radius: 4px; color: var(--text, #fff); padding: 0.25rem 0.5rem; }
 	.pipeline-name-input:hover, .pipeline-name-input:focus { border-color: var(--border, #333); outline: none; }
 	.header-actions { display: flex; gap: 0.5rem; }
 	.template-select, .add-btn, .save-btn { padding: 0.4rem 0.75rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); color: var(--text, #fff); cursor: pointer; font-size: 0.875rem; }
@@ -589,8 +640,8 @@
 	.edge:hover { stroke-width: 3; }
 
 	.side-panel { width: 420px; border-left: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); display: flex; flex-direction: column; overflow-y: auto; }
-	.panel-header { padding: 1rem; border-bottom: 1px solid var(--border, #333); }
-	.done-btn { width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border, #333); background: #3b82f6; color: #fff; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+	.panel-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border, #333); display: flex; gap: 0.5rem; align-items: center; }
+	.done-btn { padding: 0.4rem 0.75rem; border-radius: 4px; border: 1px solid var(--border, #333); background: #3b82f6; color: #fff; cursor: pointer; font-size: 0.75rem; font-weight: 500; white-space: nowrap; }
 	.done-btn:hover { background: #2563eb; }
 	.open-panel-btn { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); padding: 0.5rem 0.75rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg-secondary, #2a2a2a); color: var(--text, #fff); cursor: pointer; font-size: 1.25rem; }
 	.open-panel-btn:hover { background: #3b82f6; }
@@ -609,4 +660,23 @@
 	.properties textarea { resize: vertical; min-height: 80px; }
 	.delete-btn { width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid #ef4444; background: transparent; color: #ef4444; cursor: pointer; margin-top: 0.5rem; }
 	.delete-btn:hover { background: #ef4444; color: white; }
+
+	.tools-selector { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg, #1a1a1a); max-height: 150px; overflow-y: auto; }
+	.tool-checkbox { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.25rem; border-radius: 4px; }
+	.tool-checkbox:hover { background: var(--bg-secondary, #2a2a2a); }
+	.tool-checkbox input[type="checkbox"] { width: 1rem; height: 1rem; cursor: pointer; }
+	.tool-name { font-size: 0.875rem; color: var(--text, #fff); }
+	.no-tools-msg { font-size: 0.75rem; color: var(--text-secondary, #888); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg, #1a1a1a); }
+
+	.sidebar-tabs { display: flex; gap: 0.25rem; }
+	.sidebar-tabs button { flex: 1; padding: 0.4rem 0.5rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg, #1a1a1a); color: var(--text-secondary, #888); cursor: pointer; font-size: 0.75rem; }
+	.sidebar-tabs button.active { background: var(--bg-secondary, #2a2a2a); color: var(--text, #fff); border-color: #3b82f6; }
+	.sidebar-tabs button:hover:not(.active) { background: var(--bg-secondary, #2a2a2a); }
+
+	.tools-panel { padding: 1rem; }
+	.tools-panel h4 { margin: 0 0 0.75rem; font-size: 0.8rem; color: var(--text-secondary, #888); text-transform: uppercase; }
+	.tool-item { padding: 0.75rem; margin-bottom: 0.5rem; border-radius: 4px; border: 1px solid var(--border, #333); background: var(--bg, #1a1a1a); }
+	.tool-item strong { font-size: 0.875rem; color: var(--text, #fff); }
+	.tool-desc { font-size: 0.75rem; color: var(--text-secondary, #888); margin: 0.25rem 0; }
+	.tool-usage { font-size: 0.7rem; color: #3b82f6; }
 </style>

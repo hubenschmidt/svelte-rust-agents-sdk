@@ -120,10 +120,10 @@ pub fn seed_examples(conn: &Connection) -> Result<()> {
             name: "Blog Post Writer",
             description: "Sequential content creation: outline → draft → polish. Demonstrates prompt chaining for iterative refinement.",
             nodes: vec![
-                ("llm1", "llm", "Create a structured outline with an engaging intro, 3 main points with supporting details, and a compelling conclusion."),
-                ("gate1", "gate", ""),
-                ("llm2", "llm", "Expand the outline into a full draft. Write engaging prose, add examples, and ensure smooth transitions between sections."),
-                ("llm3", "llm", "Polish the draft: improve flow, strengthen the opening hook, add a call-to-action, and ensure consistent tone throughout."),
+                ("llm1", "llm", "Create a structured outline with an engaging intro, 3 main points with supporting details, and a compelling conclusion.", &[]),
+                ("gate1", "gate", "", &[]),
+                ("llm2", "llm", "Expand the outline into a full draft. Write engaging prose, add examples, and ensure smooth transitions between sections.", &[]),
+                ("llm3", "llm", "Polish the draft: improve flow, strengthen the opening hook, add a call-to-action, and ensure consistent tone throughout.", &[]),
             ],
             edges: vec![
                 ("input", "llm1", None),
@@ -140,10 +140,10 @@ pub fn seed_examples(conn: &Connection) -> Result<()> {
             name: "Customer Support Bot",
             description: "Routes queries to specialized handlers. Demonstrates routing for domain-specific expertise.",
             nodes: vec![
-                ("router", "router", ""),
-                ("technical_llm", "llm", "You are a technical support specialist. Diagnose issues systematically, provide step-by-step troubleshooting, and escalate complex problems with detailed notes."),
-                ("billing_llm", "llm", "You are a billing specialist. Handle payment inquiries, explain charges clearly, process refund requests, and resolve subscription issues professionally."),
-                ("general_llm", "llm", "You are a general support agent. Answer FAQs warmly, guide users to resources, and identify when specialized help is needed."),
+                ("router", "router", "", &[]),
+                ("technical_llm", "llm", "You are a technical support specialist. Diagnose issues systematically, provide step-by-step troubleshooting, and escalate complex problems with detailed notes.", &["fetch_url"]),
+                ("billing_llm", "llm", "You are a billing specialist. Handle payment inquiries, explain charges clearly, process refund requests, and resolve subscription issues professionally.", &[]),
+                ("general_llm", "llm", "You are a general support agent. Answer FAQs warmly, guide users to resources, and identify when specialized help is needed.", &[]),
             ],
             edges: vec![
                 ("input", "router", None),
@@ -158,11 +158,11 @@ pub fn seed_examples(conn: &Connection) -> Result<()> {
             name: "Document Reviewer",
             description: "Parallel analysis of grammar, style, and facts. Demonstrates parallelization for comprehensive coverage.",
             nodes: vec![
-                ("coordinator", "coordinator", "Break the document into logical sections for parallel review."),
-                ("grammar_llm", "llm", "Review for grammar, spelling, and punctuation. List each issue with its location and suggested correction."),
-                ("style_llm", "llm", "Evaluate writing style: tone consistency, clarity, readability, and engagement. Suggest specific improvements."),
-                ("facts_llm", "llm", "Verify factual claims and check for logical inconsistencies. Flag any statements that need citations or clarification."),
-                ("aggregator", "aggregator", "Combine all reviews into a prioritized feedback report. Group by severity: critical, important, minor suggestions."),
+                ("coordinator", "coordinator", "Break the document into logical sections for parallel review.", &[]),
+                ("grammar_llm", "llm", "Review for grammar, spelling, and punctuation. List each issue with its location and suggested correction.", &[]),
+                ("style_llm", "llm", "Evaluate writing style: tone consistency, clarity, readability, and engagement. Suggest specific improvements.", &[]),
+                ("facts_llm", "llm", "Verify factual claims and check for logical inconsistencies. Flag any statements that need citations or clarification.", &["web_search", "fetch_url"]),
+                ("aggregator", "aggregator", "Combine all reviews into a prioritized feedback report. Group by severity: critical, important, minor suggestions.", &[]),
             ],
             edges: vec![
                 ("input", "coordinator", None),
@@ -178,10 +178,10 @@ pub fn seed_examples(conn: &Connection) -> Result<()> {
             name: "Research Assistant",
             description: "Dynamic task decomposition for complex research. Demonstrates orchestrator-worker for adaptive workflows.",
             nodes: vec![
-                ("orchestrator", "orchestrator", "Analyze the research question. Identify key aspects to investigate. Dispatch workers for: foundational context, current data/trends, and comparative analysis."),
-                ("context_worker", "worker", "Research the historical background and foundational concepts. Provide context that frames the current state of knowledge."),
-                ("data_worker", "worker", "Find current statistics, recent studies, and emerging trends. Focus on data from the last 2-3 years."),
-                ("synthesizer", "synthesizer", "Synthesize all findings into a coherent research summary. Highlight key insights, note conflicting information, and suggest areas for further investigation."),
+                ("orchestrator", "orchestrator", "Analyze the research question. Identify key aspects to investigate. Dispatch workers for: foundational context, current data/trends, and comparative analysis.", &[]),
+                ("context_worker", "worker", "Research the historical background and foundational concepts. Provide context that frames the current state of knowledge.", &["web_search", "fetch_url"]),
+                ("data_worker", "worker", "Find current statistics, recent studies, and emerging trends. Focus on data from the last 2-3 years.", &["web_search", "fetch_url"]),
+                ("synthesizer", "synthesizer", "Synthesize all findings into a coherent research summary. Highlight key insights, note conflicting information, and suggest areas for further investigation.", &["fetch_url"]),
             ],
             edges: vec![
                 ("input", "orchestrator", None),
@@ -197,8 +197,8 @@ pub fn seed_examples(conn: &Connection) -> Result<()> {
             name: "Code Generator",
             description: "Generate code with self-critique loop. Demonstrates evaluator-optimizer for quality assurance.",
             nodes: vec![
-                ("generator", "llm", "Write clean, well-documented code for the request. Include error handling, input validation, and clear comments. Follow best practices for the language."),
-                ("evaluator", "evaluator", "Review the generated code for: correctness, edge cases, security vulnerabilities, performance, and readability. If issues found, provide specific feedback. If code meets quality standards, approve for output."),
+                ("generator", "llm", "Write clean, well-documented code for the request. Include error handling, input validation, and clear comments. Follow best practices for the language.", &["fetch_url"]),
+                ("evaluator", "evaluator", "Review the generated code for: correctness, edge cases, security vulnerabilities, performance, and readability. If issues found, provide specific feedback. If code meets quality standards, approve for output.", &[]),
             ],
             edges: vec![
                 ("input", "generator", None),
@@ -211,12 +211,13 @@ pub fn seed_examples(conn: &Connection) -> Result<()> {
 
     let example_count = examples.len();
     for ex in examples {
-        let nodes: Vec<NodeInfo> = ex.nodes.iter().map(|(id, node_type, prompt)| {
+        let nodes: Vec<NodeInfo> = ex.nodes.iter().map(|(id, node_type, prompt, tools)| {
             NodeInfo {
                 id: id.to_string(),
                 node_type: node_type.to_string(),
                 model: None,
                 prompt: if prompt.is_empty() { None } else { Some(prompt.to_string()) },
+                tools: if tools.is_empty() { None } else { Some(tools.iter().map(|s| s.to_string()).collect()) },
                 x: None,
                 y: None,
             }
@@ -254,6 +255,6 @@ struct ExampleConfig {
     id: &'static str,
     name: &'static str,
     description: &'static str,
-    nodes: Vec<(&'static str, &'static str, &'static str)>,
+    nodes: Vec<(&'static str, &'static str, &'static str, &'static [&'static str])>,
     edges: Vec<(&'static str, &'static str, Option<&'static str>)>,
 }
