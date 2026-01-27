@@ -1,6 +1,6 @@
 # fissio
 
-A visual agent orchestration platform written in Rust + Solid.js. Design, configure, and run multi-agent pipelines using proven agentic patterns.
+A visual agent orchestration platform written in Rust + Solid.js. Design, configure, and run multi-agent pipelines using agentic patterns.
 
 ## Features
 
