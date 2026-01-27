@@ -1,6 +1,6 @@
-# agents-rs
+# fissio
 
-A visual agent orchestration platform with a Svelte 5 frontend and Rust backend. Design, configure, and run multi-agent pipelines using proven agentic patterns.
+A visual agent orchestration platform written in Rust + Solid.js. Design, configure, and run multi-agent pipelines using proven agentic patterns.
 
 ## Features
 
