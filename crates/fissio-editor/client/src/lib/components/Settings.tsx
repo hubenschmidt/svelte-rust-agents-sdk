@@ -1,5 +1,4 @@
 import { createSignal, onMount, onCleanup, Show } from 'solid-js';
-import { devMode, setDevMode } from '../stores/settings';
 
 export default function Settings() {
   const [open, setOpen] = createSignal(false);
@@ -33,15 +32,7 @@ export default function Settings() {
       <Show when={open()}>
         <div class="settings-panel" onClick={(e) => e.stopPropagation()}>
           <div class="settings-header">Settings</div>
-          <label class="setting-item">
-            <input
-              type="checkbox"
-              checked={devMode()}
-              onChange={(e) => setDevMode(e.currentTarget.checked)}
-            />
-            <span>Developer Mode</span>
-          </label>
-          <p class="setting-desc">Show detailed performance metrics (tokens/sec, eval time)</p>
+          <p class="setting-desc">No settings available</p>
         </div>
       </Show>
     </div>

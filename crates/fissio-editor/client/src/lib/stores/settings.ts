@@ -1,3 +1,1 @@
-import { createSignal } from 'solid-js';
-
-export const [devMode, setDevMode] = createSignal(false);
+// Settings store - reserved for future settings

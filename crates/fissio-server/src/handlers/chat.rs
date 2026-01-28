@@ -11,6 +11,7 @@ use axum::{
 };
 use fissio_core::Message as CoreMessage;
 use fissio_engine::EngineOutput;
+use fissio_monitor::{MetricsCollector, NodeMetrics, TracingCollector};
 use futures::stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -34,8 +35,6 @@ pub struct ChatRequest {
     pub pipeline_id: Option<String>,
     #[serde(default)]
     pub node_models: HashMap<String, String>,
-    #[serde(default)]
-    pub verbose: bool,
     #[serde(default)]
     pub history: Vec<CoreMessage>,
     #[serde(default)]
@@ -96,8 +95,9 @@ async fn send_chunk(tx: &EventSender, content: &str) {
 }
 
 /// Consumes a stream and sends chunks to the SSE channel.
-/// Returns token counts from the stream.
-async fn stream_to_sse(tx: &EventSender, stream: fissio_llm::LlmStream) -> (u32, u32) {
+/// Returns (full_response, input_tokens, output_tokens).
+async fn stream_to_sse_with_response(tx: &EventSender, stream: fissio_llm::LlmStream) -> (String, u32, u32) {
+    let mut full_response = String::new();
     let mut input_tokens = 0u32;
     let mut output_tokens = 0u32;
     let mut stream = stream;
@@ -105,6 +105,7 @@ async fn stream_to_sse(tx: &EventSender, stream: fissio_llm::LlmStream) -> (u32,
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
             Ok(fissio_llm::StreamChunk::Content(chunk)) => {
+                full_response.push_str(&chunk);
                 send_chunk(tx, &chunk).await;
             }
             Ok(fissio_llm::StreamChunk::Usage { input_tokens: i, output_tokens: o }) => {
@@ -117,7 +118,7 @@ async fn stream_to_sse(tx: &EventSender, stream: fissio_llm::LlmStream) -> (u32,
         }
     }
 
-    (input_tokens, output_tokens)
+    (full_response, input_tokens, output_tokens)
 }
 
 async fn execute_chat(tx: &EventSender, req: &ChatRequest, state: &ServerState) -> StreamResult {
@@ -125,9 +126,9 @@ async fn execute_chat(tx: &EventSender, req: &ChatRequest, state: &ServerState) 
     let model = state.get_model(model_id);
     let system_prompt = req.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
 
-    // Verbose mode with Ollama native API
-    if req.verbose && model.api_base.is_some() {
-        return execute_ollama_chat(tx, &model, &req.history, &req.message, system_prompt).await;
+    // Use native Ollama API for local models (provides rich metrics)
+    if model.api_base.is_some() {
+        return execute_ollama_chat(tx, &model, &req.history, &req.message, system_prompt, state).await;
     }
 
     // Runtime pipeline config from frontend
@@ -144,7 +145,7 @@ async fn execute_chat(tx: &EventSender, req: &ChatRequest, state: &ServerState) 
     }
 
     // Direct chat
-    execute_direct(tx, &model, &req.history, &req.message, system_prompt).await
+    execute_direct(tx, &model, &req.history, &req.message, system_prompt, state).await
 }
 
 async fn execute_ollama_chat(
@@ -153,14 +154,46 @@ async fn execute_ollama_chat(
     history: &[CoreMessage],
     message: &str,
     system_prompt: &str,
+    state: &ServerState,
 ) -> StreamResult {
+    let collector = TracingCollector::new(
+        state.trace_store.clone(),
+        "direct",
+        format!("Direct Chat ({})", model.name),
+        message,
+    );
+    let start_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
     match execute_ollama_stream(model, history, message, system_prompt).await {
         Ok((stream, metrics)) => {
-            let (input_tokens, output_tokens) = stream_to_sse(tx, stream).await;
+            let (response, input_tokens, output_tokens) = stream_to_sse_with_response(tx, stream).await;
+            let end_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+
+            let node_metrics = NodeMetrics {
+                node_id: "llm".to_string(),
+                input_tokens,
+                output_tokens,
+                elapsed_ms: (end_time - start_time) as u64,
+                tool_call_count: 0,
+                iteration_count: 1,
+                estimated_cost_usd: None,
+            };
+            collector.record(node_metrics.clone());
+            collector.record_span("llm", "llm", start_time, end_time, message, &response, &node_metrics);
+            collector.success(&response);
+
+            info!("Direct chat: {}ms, tokens: {}/{}", end_time - start_time, input_tokens, output_tokens);
             StreamResult { input_tokens, output_tokens, ollama_metrics: Some(metrics) }
         }
         Err(e) => {
             error!("Ollama error: {}", e);
+            collector.error(&e.to_string());
             send_chunk(tx, "Error generating response.").await;
             StreamResult { input_tokens: 0, output_tokens: 0, ollama_metrics: None }
         }
@@ -173,14 +206,46 @@ async fn execute_direct(
     history: &[CoreMessage],
     message: &str,
     system_prompt: &str,
+    state: &ServerState,
 ) -> StreamResult {
+    let collector = TracingCollector::new(
+        state.trace_store.clone(),
+        "direct",
+        format!("Direct Chat ({})", model.name),
+        message,
+    );
+    let start_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
     match execute_direct_chat(model, history, message, system_prompt).await {
         Ok(stream) => {
-            let (input_tokens, output_tokens) = stream_to_sse(tx, stream).await;
+            let (response, input_tokens, output_tokens) = stream_to_sse_with_response(tx, stream).await;
+            let end_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+
+            let node_metrics = NodeMetrics {
+                node_id: "llm".to_string(),
+                input_tokens,
+                output_tokens,
+                elapsed_ms: (end_time - start_time) as u64,
+                tool_call_count: 0,
+                iteration_count: 1,
+                estimated_cost_usd: None,
+            };
+            collector.record(node_metrics.clone());
+            collector.record_span("llm", "llm", start_time, end_time, message, &response, &node_metrics);
+            collector.success(&response);
+
+            info!("Direct chat: {}ms, tokens: {}/{}", end_time - start_time, input_tokens, output_tokens);
             StreamResult { input_tokens, output_tokens, ollama_metrics: None }
         }
         Err(e) => {
             error!("Chat error: {}", e);
+            collector.error(&e.to_string());
             send_chunk(tx, "Error generating response.").await;
             StreamResult { input_tokens: 0, output_tokens: 0, ollama_metrics: None }
         }
@@ -200,9 +265,9 @@ async fn execute_pipeline_chat(
 
     match execute_pipeline(config, message, history, &state.models, default_model, node_overrides, trace_store).await {
         Ok(PipelineResult { output: EngineOutput::Stream(stream), collector }) => {
-            let (input_tokens, output_tokens) = stream_to_sse(tx, stream).await;
+            let (response, input_tokens, output_tokens) = stream_to_sse_with_response(tx, stream).await;
             if let Some(coll) = collector {
-                coll.success(""); // Output captured via streaming
+                coll.success(&response);
             }
             StreamResult { input_tokens, output_tokens, ollama_metrics: None }
         }

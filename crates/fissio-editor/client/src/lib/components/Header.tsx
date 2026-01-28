@@ -43,8 +43,7 @@ export default function Header(props: Props) {
               disabled={selectorsDisabled()}
               title="Agent Config"
             >
-              <option value="" disabled>-- Select agent --</option>
-              <option value="__direct__">Direct Chat</option>
+              <option value="">Direct Chat</option>
               <For each={props.pipelines}>
                 {(pipeline) => (
                   <option value={pipeline.id} title={pipeline.description}>{pipeline.name}</option>
@@ -82,6 +81,11 @@ export default function Header(props: Props) {
             </For>
           </select>
         </div>
+        <a href="/observe" class="observe-btn" title="Observe">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+          </svg>
+        </a>
         <Settings />
       </header>
     </div>

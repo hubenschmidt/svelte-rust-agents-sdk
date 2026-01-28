@@ -49,6 +49,10 @@ pub struct RuntimeEdgeConfig {
 /// Complete runtime pipeline configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RuntimePipelineConfig {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
     pub nodes: Vec<RuntimeNodeConfig>,
     pub edges: Vec<RuntimeEdgeConfig>,
 }

@@ -261,9 +261,13 @@ pub struct NodeConfig {
     /// Tool names this node can access (from the tool registry).
     #[serde(default)]
     pub tools: Vec<String>,
-    /// Optional observability configuration for this node.
-    #[serde(default)]
+    /// Observability configuration for this node (enabled by default).
+    #[serde(default = "default_observe")]
     pub observe: Option<fissio_monitor::ObserveConfig>,
+}
+
+fn default_observe() -> Option<fissio_monitor::ObserveConfig> {
+    Some(fissio_monitor::ObserveConfig::new())
 }
 
 /// Configuration for an edge connecting nodes.
@@ -534,7 +538,7 @@ impl NodeBuilder {
             prompt: None,
             tools: Vec::new(),
             config: serde_json::Value::Null,
-            observe: None,
+            observe: Some(fissio_monitor::ObserveConfig::new()),
         }
     }
 

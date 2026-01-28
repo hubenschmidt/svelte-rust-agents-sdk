@@ -1,4 +1,4 @@
-import { onMount, onCleanup, createSignal, createEffect, For, Show } from 'solid-js';
+import { onMount, createSignal, createEffect, For, Show } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { chat } from '../lib/stores/chat';
 import Header from '../lib/components/Header';
@@ -15,10 +15,6 @@ export default function Chat() {
 
   onMount(() => {
     chat.connect();
-  });
-
-  onCleanup(() => {
-    chat.disconnect();
   });
 
   const handleModelChange = (prev: string, next: string) => {

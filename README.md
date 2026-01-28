@@ -1,8 +1,6 @@
 # Fissio
 
-**Pipeline-first agent framework for LLM-powered systems.**
-
-Fissio treats declarative pipeline definitions as the primary abstraction for building agent systems. Unlike agent-centric frameworks, fissio uses graph topology for orchestration with specialized node types.
+Fissio treats declarative agent definitions and graph topology as the primary abstraction for building agentic systems.
 
 ## Features
 
@@ -17,7 +15,7 @@ Fissio treats declarative pipeline definitions as the primary abstraction for bu
 
 ```
 ┌─────────────────┐                    ┌─────────────────────────────────────┐
-│  SolidJS UI     │◄────── SSE ───────│           fissio-server             │
+│  SolidJS UI     │◄────── SSE ────────│           fissio-server             │
 │  (fissio-editor)│                    │                                     │
 │                 │                    │  LLM Providers                      │
 │  Header         │                    │  ├── OpenAI                         │

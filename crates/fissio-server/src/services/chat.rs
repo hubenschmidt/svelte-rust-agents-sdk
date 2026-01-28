@@ -7,7 +7,7 @@ use fissio_config::{EdgeConfig, EdgeEndpoint, EdgeType, NodeConfig, NodeType, Pi
 use fissio_core::{Message as CoreMessage, ModelConfig};
 use fissio_engine::{EngineOutput, PipelineEngine};
 use fissio_llm::{LlmStream, OllamaClient, OllamaMetrics, StreamChunk, UnifiedLlmClient};
-use fissio_monitor::{TraceStore, TracingCollector};
+use fissio_monitor::{ObserveConfig, TraceStore, TracingCollector};
 use futures::StreamExt;
 use tracing::{error, info};
 
@@ -29,7 +29,7 @@ pub fn runtime_to_pipeline_config(runtime: &RuntimePipelineConfig) -> PipelineCo
         config: serde_json::Value::Null,
         prompt: n.prompt.clone(),
         tools: n.tools.clone().unwrap_or_default(),
-        observe: None,
+        observe: Some(ObserveConfig::new()),
     }).collect();
 
     let edges = runtime.edges.iter().map(|e| EdgeConfig {
@@ -41,8 +41,8 @@ pub fn runtime_to_pipeline_config(runtime: &RuntimePipelineConfig) -> PipelineCo
     }).collect();
 
     PipelineConfig {
-        id: "runtime".to_string(),
-        name: "Runtime Config".to_string(),
+        id: runtime.id.clone().unwrap_or_else(|| "runtime".to_string()),
+        name: runtime.name.clone().unwrap_or_else(|| "Runtime Config".to_string()),
         description: String::new(),
         nodes,
         edges,

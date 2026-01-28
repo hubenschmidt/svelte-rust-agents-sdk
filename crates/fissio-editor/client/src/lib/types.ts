@@ -61,6 +61,8 @@ export type RuntimeEdgeConfig = {
 };
 
 export type RuntimePipelineConfig = {
+	id?: string;
+	name?: string;
 	nodes: RuntimeNodeConfig[];
 	edges: RuntimeEdgeConfig[];
 };

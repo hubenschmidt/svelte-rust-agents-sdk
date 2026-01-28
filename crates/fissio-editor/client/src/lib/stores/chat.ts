@@ -1,6 +1,5 @@
 import { createSignal, createEffect } from 'solid-js';
 import type { ChatMsg, HistoryMessage, ModelConfig, PipelineInfo, RuntimePipelineConfig, WsMetadata, ToolSchema } from '../types';
-import { devMode } from './settings';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -111,6 +110,9 @@ Always include edges from "input" to the first node(s) and from final node(s) to
   }
 
   async function connect(_url?: string) {
+    // Skip if already connected
+    if (isConnected()) return;
+
     try {
       const res = await fetch(`${API_BASE}/init`);
       if (!res.ok) {
@@ -122,9 +124,12 @@ Always include edges from "input" to the first node(s) and from final node(s) to
       const data = await res.json();
       setIsConnected(true);
 
+      // Preserve existing selection if we have one
+      const currentModel = selectedModel();
+
       if (data.models) {
         setModels(data.models);
-        if (data.models.length > 0 && !selectedModel()) {
+        if (data.models.length > 0 && !currentModel) {
           setSelectedModel(data.models[0].id);
         }
       }
@@ -195,6 +200,8 @@ Always include edges from "input" to the first node(s) and from final node(s) to
 
   function toRuntimeConfig(config: PipelineInfo): RuntimePipelineConfig {
     return {
+      id: config.id,
+      name: config.name,
       nodes: config.nodes.map((n) => ({
         id: n.id,
         type: n.node_type,
@@ -231,8 +238,7 @@ Always include edges from "input" to the first node(s) and from final node(s) to
 
     const payload: Record<string, unknown> = {
       message: text,
-      model_id: selectedModel(),
-      verbose: devMode()
+      model_id: selectedModel()
     };
 
     // In compose mode, send history and custom system prompt
@@ -241,8 +247,10 @@ Always include edges from "input" to the first node(s) and from final node(s) to
       payload.history = buildHistory();
     }
 
-    // Always send full config for user-saved pipelines (unless in compose mode)
-    if (config && mode !== 'composing') {
+    // Send pipeline config only for actual pipelines (not direct chat or compose mode)
+    const pipelineId = selectedPipeline();
+    const isDirectChat = !pipelineId;
+    if (config && mode !== 'composing' && !isDirectChat) {
       payload.pipeline_config = toRuntimeConfig(config);
     }
 
