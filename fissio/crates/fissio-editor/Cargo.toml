@@ -1,0 +1,15 @@
+[package]
+name = "fissio-editor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Visual editor frontend for fissio agent framework"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros"] }
+rust-embed = { version = "8.5", features = ["mime-guess"] }
+mime_guess = "2.0"
+
+[build-dependencies]

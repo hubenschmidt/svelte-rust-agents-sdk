@@ -1,17 +1,19 @@
 services:
-  agent:
-    build: ./agent
+  server:
+    build: ./fissio/crates/fissio-server
     ports:
       - "8000:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - ./agent/.env
+      - ./fissio/crates/fissio-server/.env
     volumes:
-      - ./agent:/app
-      - agent-target:/app/target
-      - ./fissio:/fissio
-    command: cargo watch --poll -i data/ -x "run --bin agent-server"
+      - ./fissio:/app
+      - server-target:/app/target
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    working_dir: /app/crates/fissio-server
+    command: cargo watch --poll -i data/ -x "run --bin fissio-server"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 5s
@@ -20,19 +22,21 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  client:
-    build: ./client
+  editor:
+    build: ./fissio/crates/fissio-editor/client
     ports:
       - "3001:3001"
       - "24678:24678"
     volumes:
-      - ./client:/app
+      - ./fissio/crates/fissio-editor/client:/app
       - /app/node_modules
     command: npm run dev -- --host
     depends_on:
-      agent:
+      server:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  agent-target:
+  server-target:
+  cargo-registry:
+  cargo-git:

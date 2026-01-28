@@ -187,6 +187,118 @@ let client = UnifiedLlmClient::new("llama2", Some("http://localhost:11434/v1"));
 | `fissio-engine` | DAG execution engine |
 | `fissio-llm` | LLM provider clients |
 | `fissio-tools` | Tool registry and built-in tools |
+| `fissio-editor` | Visual pipeline editor (SolidJS) |
+| `fissio-server` | Standalone HTTP server with SSE streaming |
+
+## Feature Flags
+
+```toml
+[dependencies]
+fissio = { version = "0.1", features = ["editor"] }
+```
+
+| Feature | Description |
+|---------|-------------|
+| `openai` | OpenAI provider support (default) |
+| `anthropic` | Anthropic provider support (default) |
+| `tools-web` | Web tools: fetch_url, web_search (default) |
+| `editor` | Embed visual editor UI in your binary |
+
+### Embedding the Editor
+
+```rust
+use axum::Router;
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new()
+        .merge(fissio_editor::routes());  // Serves editor at /
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+```
+
+## Docker Compose (Development)
+
+For local development with hot-reloading:
+
+```yaml
+services:
+  server:
+    build: ./fissio/crates/fissio-server
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./fissio/crates/fissio-server/.env
+    volumes:
+      - ./fissio:/app
+    working_dir: /app/crates/fissio-server
+    command: cargo watch --poll -i data/ -x "run --bin fissio-server"
+
+  editor:
+    build: ./fissio/crates/fissio-editor/client
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./fissio/crates/fissio-editor/client:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+    depends_on:
+      server:
+        condition: service_healthy
+```
+
+```bash
+docker compose up
+```
+
+- Server: http://localhost:8000
+- Editor: http://localhost:3001
+
+## Standalone Server
+
+Run `fissio-server` directly without Docker:
+
+```bash
+cd fissio/crates/fissio-server
+cargo run --release
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `data/pipelines.db` | SQLite database path |
+| `OPENAI_API_KEY` | — | OpenAI API key |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key |
+| `TAVILY_API_KEY` | — | Tavily web search API key |
+
+## Deployment
+
+### Docker (Production)
+
+Build optimized images:
+
+```bash
+# Server
+docker build -t fissio-server ./fissio/crates/fissio-server
+
+# Editor (static files served via nginx)
+docker build -t fissio-editor ./fissio/crates/fissio-editor/client
+```
+
+### Embedded Binary
+
+For single-binary deployment with embedded editor:
+
+```bash
+cd fissio/crates/fissio-editor/client
+npm install && npm run build
+
+cd ../..
+cargo build -p fissio-server --features editor --release
+```
 
 ## Built-in Tools
 

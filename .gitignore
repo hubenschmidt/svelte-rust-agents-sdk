@@ -6,11 +6,13 @@
 **/target/
 **/*.rs.bk
 
-# Node
+# Node / SolidJS
 **/node_modules/
-**/.svelte-kit/
-**/build/
 **/dist/
+
+# Database
+**/data/*.db
+**/data/*.db-journal
 
 # IDE
 .idea/
@@ -21,3 +23,6 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Misc
+master

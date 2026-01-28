@@ -88,6 +88,10 @@ pub use fissio_llm::{
 // Re-export tools
 pub use fissio_tools::{FetchUrlTool, Tool, ToolError, ToolRegistry, WebSearchTool};
 
+// Re-export editor (optional feature)
+#[cfg(feature = "editor")]
+pub use fissio_editor as editor;
+
 // Provider-specific clients (hidden by default, use UnifiedLlmClient instead)
 #[doc(hidden)]
 pub use fissio_llm::{
