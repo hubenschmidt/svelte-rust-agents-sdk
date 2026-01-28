@@ -6,7 +6,7 @@
 use std::pin::Pin;
 use std::time::Instant;
 
-use fissio_core::{AgentError, Message, MessageRole};
+use fissio_core::{AgentError, Message, MessageRole, ToolCall, ToolSchema};
 use async_openai::{
     config::OpenAIConfig,
     types::{
@@ -19,7 +19,7 @@ use async_openai::{
     Client,
 };
 use futures::Stream;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use tracing::{debug, info};
 
 /// A chunk from a streaming LLM response.
@@ -46,34 +46,11 @@ pub struct LlmResponse {
     pub metrics: LlmMetrics,
 }
 
-/// A tool call requested by the LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
-/// Result of a tool execution to be sent back to the LLM.
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    pub tool_call_id: String,
-    pub content: String,
-}
-
 /// Response from an LLM that may include tool calls.
 #[derive(Debug, Clone)]
 pub enum ChatResponse {
     Content(LlmResponse),
     ToolCalls { calls: Vec<ToolCall>, metrics: LlmMetrics },
-}
-
-/// Schema for a tool (compatible with OpenAI function calling format).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolSchema {
-    pub name: String,
-    pub description: String,
-    pub parameters: serde_json::Value,
 }
 
 /// Converts any error into an AgentError::LlmError.
@@ -168,7 +145,7 @@ impl LlmClient {
     pub async fn chat_with_tools(
         &self,
         system_prompt: &str,
-        messages: Vec<ChatCompletionRequestMessage>,
+        messages: &[ChatCompletionRequestMessage],
         tools: &[ToolSchema],
     ) -> Result<ChatResponse, AgentError> {
         let start = Instant::now();
@@ -194,7 +171,7 @@ impl LlmClient {
                     .map_err(llm_err)?,
             ),
         ];
-        all_messages.extend(messages);
+        all_messages.extend(messages.iter().cloned());
 
         let mut request_builder = CreateChatCompletionRequestArgs::default();
         request_builder.model(&self.default_model).messages(all_messages);

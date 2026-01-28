@@ -1,19 +1,12 @@
-//! Data transfer objects for HTTP and WebSocket message serialization.
+//! Data transfer objects for HTTP message serialization.
 
 use std::collections::HashMap;
 use std::fmt;
 
-use fissio_core::{Message, ModelConfig};
+use fissio_core::ModelConfig;
 use serde::{Deserialize, Serialize};
 
-// === HTTP Request/Response Types ===
-
-/// Request to warm up a model.
-#[derive(Debug, Deserialize)]
-pub struct WakeRequest {
-    pub model_id: String,
-    pub previous_model_id: Option<String>,
-}
+// === Model Management Types ===
 
 /// Response from model warmup.
 #[derive(Debug, Serialize)]
@@ -22,19 +15,13 @@ pub struct WakeResponse {
     pub model: String,
 }
 
-/// Request to unload a model.
-#[derive(Debug, Deserialize)]
-pub struct UnloadRequest {
-    pub model_id: String,
-}
-
 /// Response from model unload.
 #[derive(Debug, Serialize)]
 pub struct UnloadResponse {
     pub success: bool,
 }
 
-// === WebSocket Message Types ===
+// === Runtime Pipeline Config Types ===
 
 /// Runtime node configuration from the frontend.
 #[derive(Debug, Clone, Deserialize)]
@@ -64,27 +51,6 @@ pub struct RuntimeEdgeConfig {
 pub struct RuntimePipelineConfig {
     pub nodes: Vec<RuntimeNodeConfig>,
     pub edges: Vec<RuntimeEdgeConfig>,
-}
-
-/// Incoming WebSocket message payload.
-#[derive(Debug, Deserialize)]
-pub struct WsPayload {
-    pub uuid: Option<String>,
-    pub message: Option<String>,
-    pub model_id: Option<String>,
-    pub pipeline_id: Option<String>,
-    #[serde(default)]
-    pub node_models: HashMap<String, String>,
-    #[serde(default)]
-    pub init: bool,
-    #[serde(default)]
-    pub verbose: bool,
-    pub wake_model_id: Option<String>,
-    pub unload_model_id: Option<String>,
-    #[serde(default)]
-    pub history: Vec<Message>,
-    pub pipeline_config: Option<RuntimePipelineConfig>,
-    pub system_prompt: Option<String>,
 }
 
 // === Pipeline Info Types ===
@@ -194,28 +160,3 @@ impl fmt::Display for WsMetadata {
     }
 }
 
-/// Outgoing WebSocket message types.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum WsResponse {
-    Stream { on_chat_model_stream: String },
-    End { on_chat_model_end: bool, metadata: Option<WsMetadata> },
-    ModelStatus { model_status: String },
-}
-
-impl WsResponse {
-    /// Creates a streaming content chunk response.
-    pub fn stream(content: &str) -> Self {
-        Self::Stream { on_chat_model_stream: content.to_string() }
-    }
-
-    /// Creates an end-of-stream response with metadata.
-    pub fn end_with_metadata(metadata: WsMetadata) -> Self {
-        Self::End { on_chat_model_end: true, metadata: Some(metadata) }
-    }
-
-    /// Creates a model status update response.
-    pub fn model_status(status: &str) -> Self {
-        Self::ModelStatus { model_status: status.to_string() }
-    }
-}

@@ -333,21 +333,8 @@ impl PipelineEngine {
 
         // Process outgoing edges
         for node_id in target_ids {
-            let next_nodes = router_decisions.get(node_id);
-            for next_edge in self.get_outgoing_edges(node_id) {
-                let next_targets = next_edge.to.as_vec();
-                if next_targets.iter().any(|t| executed.contains(*t)) {
-                    continue;
-                }
-                // If router returned specific targets, only follow matching edges
-                if let Some(routed) = next_nodes {
-                    let should_follow = next_targets.iter().any(|t| routed.contains(&t.to_string()));
-                    if !should_follow {
-                        continue;
-                    }
-                }
-                self.process_edge(next_edge, context, executed, history, step).await?;
-            }
+            let router_targets = router_decisions.get(node_id).map(|v| v.as_slice()).unwrap_or(&[]);
+            self.process_outgoing_edges(node_id, router_targets, context, executed, history, step).await?;
         }
 
         Ok(())
@@ -384,17 +371,7 @@ impl PipelineEngine {
             executed.insert(node_id.to_string());
 
             // Process outgoing edges - filter by router decision if applicable
-            for next_edge in self.get_outgoing_edges(node_id) {
-                // If router returned specific targets, only follow matching edges
-                if !output.next_nodes.is_empty() {
-                    let edge_targets = next_edge.to.as_vec();
-                    let should_follow = edge_targets.iter().any(|t| output.next_nodes.contains(&t.to_string()));
-                    if !should_follow {
-                        continue;
-                    }
-                }
-                self.process_edge(next_edge, context, executed, history, step).await?;
-            }
+            self.process_outgoing_edges(node_id, &output.next_nodes, context, executed, history, step).await?;
         }
 
         Ok(())
@@ -420,6 +397,37 @@ impl PipelineEngine {
         }
 
         ctx.get("input").cloned().unwrap_or_default()
+    }
+
+    /// Processes outgoing edges for a node, filtering by router decisions if applicable.
+    async fn process_outgoing_edges(
+        &self,
+        node_id: &str,
+        router_targets: &[String],
+        context: &Arc<RwLock<HashMap<String, String>>>,
+        executed: &mut HashSet<String>,
+        history: &[fissio_core::Message],
+        step: &Arc<RwLock<usize>>,
+    ) -> Result<(), AgentError> {
+        for next_edge in self.get_outgoing_edges(node_id) {
+            let edge_targets = next_edge.to.as_vec();
+
+            // Skip if any target already executed
+            if edge_targets.iter().any(|t| executed.contains(*t)) {
+                continue;
+            }
+
+            // If router returned specific targets, only follow matching edges
+            if !router_targets.is_empty() {
+                let should_follow = edge_targets.iter().any(|t| router_targets.contains(&t.to_string()));
+                if !should_follow {
+                    continue;
+                }
+            }
+
+            self.process_edge(next_edge, context, executed, history, step).await?;
+        }
+        Ok(())
     }
 }
 
@@ -493,22 +501,19 @@ async fn execute_router(
 
     info!("║     Router decision: '{}'", decision);
 
-    // Match decision to available targets (case-insensitive, partial match)
-    let matched: Vec<String> = outgoing_targets
+    // Match decision to available targets (case-insensitive, exact match only)
+    let matched = outgoing_targets
         .iter()
-        .filter(|t| {
-            let t_lower = t.to_lowercase();
-            decision.contains(&t_lower) || t_lower.contains(&decision)
-        })
-        .cloned()
-        .collect();
+        .find(|t| t.to_lowercase() == decision)
+        .cloned();
 
     // Fall back to first target if no match
-    let next_nodes = if matched.is_empty() {
-        warn!("║     ⚠ No matching target for '{}', defaulting to first: {:?}", decision, outgoing_targets.first());
-        outgoing_targets.first().map(|t| vec![t.clone()]).unwrap_or_default()
-    } else {
-        matched
+    let next_nodes = match matched {
+        Some(target) => vec![target],
+        None => {
+            warn!("║     ⚠ No exact match for '{}' in {:?}, defaulting to first", decision, outgoing_targets);
+            outgoing_targets.first().map(|t| vec![t.clone()]).unwrap_or_default()
+        }
     };
 
     Ok((response.content, next_nodes))
@@ -570,7 +575,7 @@ async fn execute_node_with_tools(
         let response = client
             .chat_with_tools(
                 system_prompt,
-                messages.clone(),
+                &messages,
                 &tool_schemas,
                 pending_tool_calls.as_deref(),
             )

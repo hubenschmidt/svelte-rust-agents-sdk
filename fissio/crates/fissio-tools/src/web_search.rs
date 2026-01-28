@@ -42,6 +42,7 @@ struct TavilyResult {
     url: String,
     content: String,
     #[serde(default)]
+    #[allow(dead_code)]
     score: f64,
 }
 

@@ -36,8 +36,7 @@ async fn do_warmup(model: &ModelConfig) -> Result<(), AppError> {
     let client = LlmClient::new(&model.model, model.api_base.as_deref());
     let mut stream = client
         .chat_stream("You are a helpful assistant.", &[], "hi")
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .await?;
 
     while stream.next().await.is_some() {}
     Ok(())
@@ -54,9 +53,7 @@ pub async fn unload(state: &ServerState, model_id: &str) -> Result<(), AppError>
     let ollama_host = api_base.trim_end_matches("/v1");
     info!("Unloading model: {}", model.name);
 
-    unload_model(ollama_host, &model.model)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    unload_model(ollama_host, &model.model).await?;
 
     Ok(())
 }

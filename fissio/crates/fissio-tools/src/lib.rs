@@ -59,10 +59,11 @@ pub use fetch_url::FetchUrlTool;
 pub use web_search::WebSearchTool;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
+
+pub use fissio_core::{ToolCall, ToolResult, ToolSchema};
 
 /// Errors that can occur during tool execution.
 #[derive(Error, Debug)]
@@ -82,29 +83,6 @@ pub enum ToolError {
     /// Requested tool was not found in the registry.
     #[error("Tool not found: {0}")]
     NotFound(String),
-}
-
-/// JSON schema describing a tool for LLM function calling.
-///
-/// This follows the OpenAI function calling format and is used
-/// to inform the LLM about available tools and their parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolSchema {
-    /// Unique name of the tool (e.g., "web_search", "fetch_url").
-    pub name: String,
-    /// Human-readable description of what the tool does.
-    pub description: String,
-    /// JSON Schema object describing the tool's parameters.
-    pub parameters: serde_json::Value,
-}
-
-/// Result of a tool execution to be sent back to the LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResult {
-    /// ID from the original tool call request.
-    pub tool_call_id: String,
-    /// Output content from the tool execution.
-    pub content: String,
 }
 
 /// Trait for implementing tools that can be called by LLMs.

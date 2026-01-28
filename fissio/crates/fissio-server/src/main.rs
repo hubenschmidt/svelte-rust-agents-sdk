@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use tokio::sync::RwLock;
 
-use fissio_config::{EdgeEndpoint, PresetRegistry};
+use fissio_config::PresetRegistry;
 use fissio_core::ModelConfig;
 use fissio_llm::discover_models;
 use fissio_tools::ToolRegistry;
@@ -186,15 +186,6 @@ async fn init_server_state() -> ServerState {
         PresetRegistry::new()
     });
 
-    fn endpoint_to_json(ep: &EdgeEndpoint) -> serde_json::Value {
-        match ep {
-            EdgeEndpoint::Single(s) => serde_json::Value::String(s.clone()),
-            EdgeEndpoint::Multiple(v) => serde_json::Value::Array(
-                v.iter().map(|s| serde_json::Value::String(s.clone())).collect()
-            ),
-        }
-    }
-
     let templates: Vec<PipelineInfo> = presets
         .list()
         .iter()
@@ -204,7 +195,7 @@ async fn init_server_state() -> ServerState {
             description: p.description.clone(),
             nodes: p.nodes.iter().map(|n| NodeInfo {
                 id: n.id.clone(),
-                node_type: format!("{:?}", n.node_type).to_lowercase(),
+                node_type: n.node_type.to_string(),
                 model: n.model.clone(),
                 prompt: n.prompt.clone(),
                 tools: if n.tools.is_empty() { None } else { Some(n.tools.clone()) },
@@ -212,12 +203,12 @@ async fn init_server_state() -> ServerState {
                 y: None,
             }).collect(),
             edges: p.edges.iter().map(|e| EdgeInfo {
-                from: endpoint_to_json(&e.from),
-                to: endpoint_to_json(&e.to),
+                from: serde_json::Value::from(&e.from),
+                to: serde_json::Value::from(&e.to),
                 edge_type: if e.edge_type == fissio_config::EdgeType::Direct {
                     None
                 } else {
-                    Some(format!("{:?}", e.edge_type).to_lowercase())
+                    Some(e.edge_type.to_string())
                 },
             }).collect(),
             layout: None,

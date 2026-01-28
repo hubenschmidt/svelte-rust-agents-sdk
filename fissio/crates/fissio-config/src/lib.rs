@@ -149,6 +149,23 @@ impl FromStr for NodeType {
     }
 }
 
+impl std::fmt::Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Llm => "llm",
+            Self::Gate => "gate",
+            Self::Router => "router",
+            Self::Coordinator => "coordinator",
+            Self::Aggregator => "aggregator",
+            Self::Orchestrator => "orchestrator",
+            Self::Worker => "worker",
+            Self::Synthesizer => "synthesizer",
+            Self::Evaluator => "evaluator",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 impl NodeType {
     /// Returns `true` if this node type makes an LLM call.
     pub fn requires_llm(&self) -> bool {
@@ -212,6 +229,18 @@ impl FromStr for EdgeType {
     }
 }
 
+impl std::fmt::Display for EdgeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Direct => "direct",
+            Self::Dynamic => "dynamic",
+            Self::Conditional => "conditional",
+            Self::Parallel => "parallel",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 /// Configuration for a single node in a pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -265,6 +294,45 @@ impl EdgeEndpoint {
             EdgeEndpoint::Single(s) => vec![s.as_str()],
             EdgeEndpoint::Multiple(v) => v.iter().map(|s| s.as_str()).collect(),
         }
+    }
+}
+
+impl From<&serde_json::Value> for EdgeEndpoint {
+    fn from(val: &serde_json::Value) -> Self {
+        match val {
+            serde_json::Value::String(s) => EdgeEndpoint::Single(s.clone()),
+            serde_json::Value::Array(arr) => {
+                let strings: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                EdgeEndpoint::Multiple(strings)
+            }
+            _ => EdgeEndpoint::Single(String::new()),
+        }
+    }
+}
+
+impl From<serde_json::Value> for EdgeEndpoint {
+    fn from(val: serde_json::Value) -> Self {
+        EdgeEndpoint::from(&val)
+    }
+}
+
+impl From<&EdgeEndpoint> for serde_json::Value {
+    fn from(ep: &EdgeEndpoint) -> Self {
+        match ep {
+            EdgeEndpoint::Single(s) => serde_json::Value::String(s.clone()),
+            EdgeEndpoint::Multiple(v) => {
+                serde_json::Value::Array(v.iter().map(|s| serde_json::Value::String(s.clone())).collect())
+            }
+        }
+    }
+}
+
+impl From<EdgeEndpoint> for serde_json::Value {
+    fn from(ep: EdgeEndpoint) -> Self {
+        serde_json::Value::from(&ep)
     }
 }
 

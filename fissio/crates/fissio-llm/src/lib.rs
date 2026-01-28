@@ -69,6 +69,7 @@ mod ollama;
 mod unified;
 
 pub use anthropic::AnthropicClient;
-pub use client::{ChatResponse, LlmClient, LlmMetrics, LlmResponse, LlmStream, StreamChunk, ToolCall, ToolSchema};
+pub use client::{ChatResponse, LlmClient, LlmMetrics, LlmResponse, LlmStream, StreamChunk};
+pub use fissio_core::{ToolCall, ToolResult, ToolSchema};
 pub use ollama::{discover_models, unload_model, OllamaClient, OllamaMetrics, OllamaMetricsCollector};
 pub use unified::UnifiedLlmClient;

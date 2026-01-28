@@ -16,6 +16,31 @@ pub enum AppError {
     Internal(String),
 }
 
+impl AppError {
+    /// Creates an Internal error from any error type.
+    pub fn internal(e: impl std::fmt::Display) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for AppError {
+    fn from(e: rusqlite::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(e: serde_json::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
+impl From<fissio_core::AgentError> for AppError {
+    fn from(e: fissio_core::AgentError) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,

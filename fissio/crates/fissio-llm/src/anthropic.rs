@@ -1,11 +1,11 @@
 //! Anthropic Claude API client with streaming and tool support.
 
-use fissio_core::{AgentError, Message, MessageRole};
+use fissio_core::{AgentError, Message, MessageRole, ToolCall, ToolSchema};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
-use crate::client::{ChatResponse, ToolCall, ToolSchema};
+use crate::client::ChatResponse;
 use crate::{LlmMetrics, LlmResponse, LlmStream, StreamChunk};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -113,6 +113,7 @@ enum MessageContentBlock {
 struct ToolResponse {
     content: Vec<ToolResponseBlock>,
     usage: Usage,
+    #[allow(dead_code)]
     stop_reason: Option<String>,
 }
 
